@@ -21,11 +21,17 @@ jobs:
       publish: ${{ steps.version.outputs.publish }}
       release: ${{ steps.version.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - id: version
         run: bash .github/scripts/version.sh
+      - name: Show version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "::notice title=Version::${VERSION}"
+          echo "### Version: ${VERSION}" >> "${GITHUB_STEP_SUMMARY}"
 
   test:
     needs: version
@@ -37,8 +43,8 @@ jobs:
       matrix:
         java: ["21", "25"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ matrix.java }}
@@ -49,6 +55,7 @@ jobs:
         run: ./mvnw -B -ntp verify -Drevision="${VERSION}"
 
   publish:
+    name: Publish ${{ needs.version.outputs.version }}
     needs: [version, test]
     if: >-
       always()
@@ -67,25 +74,26 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-java@v4
+          ssh-key: ${{ github.ref_name == 'main' && secrets.RELEASE_DEPLOY_KEY || '' }}
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
           cache: maven
           server-id: github
 
-      - name: Set version in pom.xml (hotfix)
-        if: startsWith(github.ref_name, 'hotfix/')
+      - name: Set version in pom.xml
+        if: needs.version.outputs.release == 'true'
         run: |
           current=$(sed -nE 's#^[[:space:]]*<revision>([^<]+)</revision>.*#\1#p' pom.xml | head -n 1)
           if [ "${current}" != "${VERSION}" ]; then
             sed -i -E "0,/<revision>/ s#<revision>[^<]*</revision>#<revision>${VERSION}</revision>#" pom.xml
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "chore: set version to ${VERSION}"
+            git commit -am "chore: release ${VERSION} [skip ci]"
             git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
           fi
 
