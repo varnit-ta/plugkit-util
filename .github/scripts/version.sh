@@ -13,6 +13,11 @@ next="${major}.$((minor + 1)).0"
 event="${GITHUB_EVENT_NAME:-push}"
 branch="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
 
+if [[ "${GITHUB_REF_TYPE:-branch}" != "branch" ]]; then
+  echo "Build & Release must run on a branch, not on ${GITHUB_REF_TYPE} '${branch}'" >&2
+  exit 1
+fi
+
 version=""
 publish="false"
 release="false"
@@ -25,7 +30,7 @@ if [[ "${branch}" == "main" ]]; then
 elif [[ "${branch}" == hotfix* ]]; then
   fail() { echo "hotfix: $1" >&2; exit 1; }
 
-  [[ "${branch}" =~ ^hotfix/([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] \
+  [[ "${branch}" =~ ^hotfix/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
     || fail "branch must be named hotfix/X.Y.Z, e.g. hotfix/0.2.1 (got '${branch}')"
   h_major="${BASH_REMATCH[1]}"
   h_minor="${BASH_REMATCH[2]}"
