@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
-MARKER = "<!-- plugkit:new-code-coverage -->"
+MARKER = "<!-- plugkit-util:new-code-coverage -->"
 SOURCE_DIRS = ("src/main/java",)
 SOURCE_SUFFIXES = (".java",)
 REPORT_GLOB = "**/target/site/jacoco/jacoco.xml"

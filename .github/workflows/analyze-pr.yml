@@ -41,6 +41,7 @@ jobs:
         id: coverage
         env:
           BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set +e
           python3 .github/scripts/new_code_coverage.py \
@@ -48,7 +49,10 @@ jobs:
             --threshold "${MIN_NEW_CODE_COVERAGE}" \
             --output coverage.md
           echo "status=$?" >> "${GITHUB_OUTPUT}"
-          if [ -f coverage.md ]; then cat coverage.md >> "${GITHUB_STEP_SUMMARY}"; fi
+          if [ -f coverage.md ]; then
+            printf '\n_Updated for commit %s_\n' "${HEAD_SHA:0:7}" >> coverage.md
+            cat coverage.md >> "${GITHUB_STEP_SUMMARY}"
+          fi
           exit 0
 
       - name: Post or update PR comment
@@ -59,7 +63,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
-          marker='<!-- plugkit:new-code-coverage -->'
+          marker='<!-- plugkit-util:new-code-coverage -->'
           comment_id=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
             --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" | head -n 1)
           if [ -n "${comment_id}" ]; then

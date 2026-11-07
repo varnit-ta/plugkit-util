@@ -18,23 +18,7 @@ publish="false"
 release="false"
 
 if [[ "${branch}" == "main" ]]; then
-  manual_version="${RELEASE_VERSION:-}"
-  if [[ -n "${manual_version}" ]]; then
-    if ! [[ "${manual_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      echo "version must look like X.Y.Z (got '${manual_version}')" >&2
-      exit 1
-    fi
-    if [[ "$(printf '%s\n%s\n' "${latest}" "${manual_version}" | sort -V | tail -n 1)" != "${manual_version}" \
-          || "${manual_version}" == "${latest}" ]]; then
-      echo "version ${manual_version} must be higher than the latest release ${latest}" >&2
-      exit 1
-    fi
-    version="${manual_version}"
-  elif [[ "${latest}" == "0.0.0" ]]; then
-    version="0.1.0"
-  else
-    version="${next}"
-  fi
+  version="${next}"
   publish="true"
   release="true"
 

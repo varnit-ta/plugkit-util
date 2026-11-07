@@ -5,11 +5,11 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>io.github.varnit-ta</groupId>
-  <artifactId>plugkit-parent</artifactId>
+  <artifactId>plugkit-util-parent</artifactId>
   <version>${revision}</version>
   <packaging>pom</packaging>
 
-  <name>plugkit</name>
+  <name>plugkit-util</name>
   <description>Plug-and-play infrastructure libraries for Java</description>
   <url>https://github.com/varnit-ta/plugkit-util</url>
 
