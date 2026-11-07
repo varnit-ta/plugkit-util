@@ -26,6 +26,12 @@ jobs:
           fetch-depth: 0
       - id: version
         run: bash .github/scripts/version.sh
+      - name: Show version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "::notice title=Version::${VERSION}"
+          echo "### Version: ${VERSION}" >> "${GITHUB_STEP_SUMMARY}"
 
   test:
     needs: version
@@ -49,6 +55,7 @@ jobs:
         run: ./mvnw -B -ntp verify -Drevision="${VERSION}"
 
   publish:
+    name: Publish ${{ needs.version.outputs.version }}
     needs: [version, test]
     if: >-
       always()
