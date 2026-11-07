@@ -23,7 +23,18 @@ publish="false"
 release="false"
 
 if [[ "${branch}" == "main" ]]; then
-  version="${next}"
+  pom_version="$(sed -nE 's#^[[:space:]]*<revision>([^<]+)</revision>.*#\1#p' pom.xml | head -n 1)"
+  higher="$(printf '%s\n%s\n' "${latest}" "${pom_version}" | sort -V | tail -n 1)"
+  if [[ "${pom_version}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ \
+        && "${pom_version}" != "${latest}" && "${higher}" == "${pom_version}" ]]; then
+    if [[ "${BASH_REMATCH[3]}" != "0" ]]; then
+      echo "pom.xml <revision> ${pom_version}: main releases X.Y.0 versions; patch versions come from hotfix/X.Y.Z branches" >&2
+      exit 1
+    fi
+    version="${pom_version}"
+  else
+    version="${next}"
+  fi
   publish="true"
   release="true"
 
