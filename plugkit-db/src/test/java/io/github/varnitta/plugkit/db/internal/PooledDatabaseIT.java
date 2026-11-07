@@ -7,8 +7,8 @@ import io.github.varnitta.plugkit.db.Database;
 import io.github.varnitta.plugkit.db.DatabaseType;
 import io.github.varnitta.plugkit.db.Databases;
 import io.github.varnitta.plugkit.db.Health;
+import io.github.varnitta.plugkit.db.TestPostgres;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
-import io.github.varnitta.plugkit.db.config.PoolConfig;
 import io.github.varnitta.plugkit.db.config.SessionConfig;
 import io.github.varnitta.plugkit.db.dialect.postgres.PostgresDialect;
 import io.github.varnitta.plugkit.db.exception.ConnectionLost;
@@ -20,15 +20,10 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @Testcontainers(disabledWithoutDocker = true)
 class PooledDatabaseIT {
-
-    @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
 
     @Test
     void startsAndReportsHealthy() {
@@ -121,12 +116,7 @@ class PooledDatabaseIT {
     }
 
     private static DatabaseConfig.DatabaseConfigBuilder config() {
-        return DatabaseConfig.builder()
-                .url(POSTGRES.getJdbcUrl())
-                .user(POSTGRES.getUsername())
-                .password(POSTGRES.getPassword())
-                .poolName("it")
-                .pool(PoolConfig.builder().maxSize(2).build());
+        return TestPostgres.config();
     }
 
     private static String show(PooledDatabase db, String setting) throws SQLException {

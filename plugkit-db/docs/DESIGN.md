@@ -229,9 +229,44 @@ public final class Databases {
 }
 ```
 
-- SQL uses named parameters (`:id`). The API never builds SQL from string fragments.
-- `queryOne` throws `QueryFailure` if more than one row comes back.
 - `Database` is thread-safe. `Transaction` is bound to one thread and is only valid inside its callback.
+
+### Parameters
+
+- SQL uses named parameters (`:id`). The API never builds SQL from string fragments.
+- `Params.of("id", 42).and("status", "OPEN")`. Values may be `null`. Names must be identifiers and
+  can't repeat. `toString()` shows names only, never values.
+- The parser skips string literals, quoted identifiers, `--` and `/* */` comments, dollar-quoted
+  text (`$$ … $$`, `$tag$ … $tag$`) and `::` casts.
+- A `Collection` value expands for `IN` lists: `in (:ids)` → `in (?, ?, ?)`. An empty collection is
+  rejected. Arrays bind as one value (for `= any(:ids)`).
+- `Instant` binds as a UTC `OffsetDateTime`; enums bind as `name()`; everything else goes to
+  `setObject`.
+- A parameter in the SQL with no value throws `IllegalArgumentException` listing the given names.
+  Extra values are ignored, so one `Params` can serve several statements.
+
+### Rows
+
+- `RowMapper<T>` maps one `Row`. A `Row` is only valid inside the mapper call.
+- Typed getters (`getString`, `getLong`, `getInt`, `getBoolean`, `getBigDecimal`, `getInstant`,
+  `getLocalDate`, `getUuid`) and `get(column, Class)` return `null` for SQL `NULL`.
+- `require(column, Class)` returns a non-null value or throws `QueryFailure` naming the column.
+
+### Statements
+
+| Method | Behaviour |
+|---|---|
+| `query` | All rows, mapped |
+| `queryOne` | `Optional` of zero or one row; more than one throws `QueryFailure`. Fetches at most two rows. Works with `insert … returning` |
+| `update` | Row count; also for DDL |
+| `batch` | One prepared statement, executed as a single atomic transaction; returns per-row counts. Every row must expand to the same SQL. An empty list does nothing |
+
+- Outside a transaction each call borrows a connection, runs in auto-commit and returns it.
+- Pool exhausted: `AcquireTimeout` with pool stats and the fix, for example
+  `No connection available within 300 ms [pool=orders, active=1, idle=0, waiting=0]. Increase pool.maxSize, …`.
+  If the pool couldn't create a connection at all, the driver's error is translated instead.
+- Batch failures: pgjdbc's `BatchUpdateException` message contains the SQL with bound values, so
+  the dialect classifies the error and builds the message from the underlying server error instead.
 
 ## 8. Transactions
 

@@ -16,6 +16,7 @@ import io.github.varnitta.plugkit.db.exception.StatementTimeout;
 import io.github.varnitta.plugkit.db.exception.TransactionTimeout;
 import io.github.varnitta.plugkit.db.exception.UniqueViolation;
 import io.github.varnitta.plugkit.db.internal.ConfigValidator;
+import java.sql.BatchUpdateException;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Collections;
@@ -70,7 +71,8 @@ public final class PostgresDialect implements Dialect {
 
     @Override
     public DatabaseException translate(SQLException exception, String poolName) {
-        String sqlState = exception.getSQLState();
+        SQLException source = sourceOf(exception);
+        String sqlState = source.getSQLState() != null ? source.getSQLState() : exception.getSQLState();
         String message = describe(exception, sqlState, poolName);
         if (sqlState == null) {
             return new QueryFailure(message, null, exception);
@@ -104,7 +106,9 @@ public final class PostgresDialect implements Dialect {
     private static String describe(SQLException exception, @Nullable String sqlState, String poolName) {
         ServerErrorMessage server = serverMessage(exception);
         String serverText = server == null ? null : server.getMessage();
-        String text = serverText != null ? serverText : exception.getMessage();
+        String text = serverText != null ? serverText
+                : exception instanceof BatchUpdateException ? "Batch statement failed"
+                : exception.getMessage();
         return (text == null ? "Database error" : text)
                 + " [pool=" + poolName + (sqlState == null ? "" : ", SQLState=" + sqlState) + "]";
     }
@@ -115,6 +119,11 @@ public final class PostgresDialect implements Dialect {
     }
 
     private static @Nullable ServerErrorMessage serverMessage(SQLException exception) {
-        return exception instanceof PSQLException psql ? psql.getServerErrorMessage() : null;
+        return sourceOf(exception) instanceof PSQLException psql ? psql.getServerErrorMessage() : null;
+    }
+
+    private static SQLException sourceOf(SQLException exception) {
+        SQLException next = exception instanceof BatchUpdateException ? exception.getNextException() : null;
+        return next != null ? next : exception;
     }
 }
