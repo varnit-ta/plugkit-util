@@ -2,8 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: ["**"]
-    tags-ignore: ["**"]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
