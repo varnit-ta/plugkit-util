@@ -1,15 +1,10 @@
-name: build
+name: Build & Release
 
 on:
   push:
     branches: ["**"]
     tags-ignore: ["**"]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version for main, e.g. 1.0.0 (empty = next minor)"
-        type: string
-        required: false
 
 permissions:
   contents: read
@@ -31,8 +26,6 @@ jobs:
         with:
           fetch-depth: 0
       - id: version
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
         run: bash .github/scripts/version.sh
 
   test:
