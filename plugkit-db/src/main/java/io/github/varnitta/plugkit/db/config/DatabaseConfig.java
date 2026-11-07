@@ -19,6 +19,37 @@ import lombok.Builder;
 import lombok.Singular;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * Everything needed to connect to a database and run a connection pool.
+ *
+ * <p>Build it with {@code DatabaseConfig.builder()}; only {@code url} is required, every other setting has a safe
+ * default. The {@link DatabaseType} is inferred from the URL unless set explicitly, in which case it must
+ * match. Invalid settings throw
+ * {@link io.github.varnitta.plugkit.db.exception.InvalidConfigException} listing every problem.
+ *
+ * <pre>{@code
+ * DatabaseConfig config = DatabaseConfig.builder()
+ *         .url("jdbc:postgresql://localhost:5432/app")
+ *         .user("app")
+ *         .password(secret)
+ *         .pool(PoolConfig.builder().maxSize(20).build())
+ *         .driverProperty("sslmode", "require")
+ *         .build();
+ * }</pre>
+ *
+ * <p>{@link #toString()} redacts the password, secrets in the URL and secret driver properties.
+ *
+ * @param type               the database type; inferred from {@code url} when not set
+ * @param url                the JDBC URL; required
+ * @param user               the database user, or {@code null} when the URL or driver supplies it
+ * @param password           the password, or {@code null} for passwordless authentication such as IAM
+ * @param poolName           the name used in logs, metrics and error messages; default {@code plugkit-db}
+ * @param pool               connection pool settings
+ * @param session            timeouts the database server enforces
+ * @param tx                 transaction settings
+ * @param slowQueryThreshold statements slower than this are logged as warnings; default 1s
+ * @param driverProperties   extra properties passed to the JDBC driver as-is
+ */
 public record DatabaseConfig(
         DatabaseType type,
         String url,

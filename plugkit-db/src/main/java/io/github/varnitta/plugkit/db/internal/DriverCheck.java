@@ -4,6 +4,9 @@ import io.github.varnitta.plugkit.db.dialect.Dialect;
 import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
 import java.util.List;
 
+/**
+ * Fails fast with the dependency to add when the JDBC driver for the configured database is missing.
+ */
 final class DriverCheck {
 
     private DriverCheck() {

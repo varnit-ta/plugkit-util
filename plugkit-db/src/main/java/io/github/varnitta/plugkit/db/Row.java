@@ -6,6 +6,12 @@ import java.time.LocalDate;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * The current row of a query result, passed to a {@link RowMapper}.
+ *
+ * <p>Getters return {@code null} for SQL {@code NULL}; {@link #require(String, Class)} throws instead.
+ * A {@code Row} is only valid during the {@link RowMapper#map(Row)} call it is passed to.
+ */
 public interface Row {
 
     <T> @Nullable T get(String column, Class<T> type);

@@ -6,6 +6,12 @@ import io.github.varnitta.plugkit.db.exception.DatabaseException;
 import java.sql.SQLException;
 import java.util.Map;
 
+/**
+ * Database-specific behaviour: driver details, connection properties and error translation.
+ *
+ * <p>Dialects are internal. Each {@link io.github.varnitta.plugkit.db.DatabaseType} has exactly one,
+ * looked up through {@link Dialects}.
+ */
 public interface Dialect {
 
     DatabaseType type();

@@ -27,6 +27,14 @@ import org.jspecify.annotations.Nullable;
 import org.postgresql.util.PSQLException;
 import org.postgresql.util.ServerErrorMessage;
 
+/**
+ * PostgreSQL dialect.
+ *
+ * <p>Sends session timeouts through the driver's {@code options} property, derives
+ * {@code socketTimeout} from the statement timeout, disables server error detail in driver messages and
+ * maps SQLState codes to {@link io.github.varnitta.plugkit.db.exception.DatabaseException} types.
+ * Messages use the server's primary error text, never its {@code DETAIL}, so row values don't leak.
+ */
 public final class PostgresDialect implements Dialect {
 
     static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);

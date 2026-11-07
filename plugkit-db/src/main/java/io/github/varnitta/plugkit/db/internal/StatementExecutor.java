@@ -17,6 +17,10 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Prepares, binds and runs statements on a given connection, and logs statements slower than
+ * {@code slowQueryThreshold} without their parameter values.
+ */
 final class StatementExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(StatementExecutor.class);

@@ -9,6 +9,11 @@ import io.github.varnitta.plugkit.db.dialect.Dialect;
 import io.github.varnitta.plugkit.db.exception.ConnectionLost;
 import java.sql.SQLException;
 
+/**
+ * Builds the HikariCP pool from a {@link io.github.varnitta.plugkit.db.config.DatabaseConfig} and
+ * translates a failed first connection into a
+ * {@link io.github.varnitta.plugkit.db.exception.DatabaseException}.
+ */
 final class HikariPoolFactory {
 
     private HikariPoolFactory() {

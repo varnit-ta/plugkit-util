@@ -5,6 +5,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Collects configuration problems and throws them together as an
+ * {@link io.github.varnitta.plugkit.db.exception.InvalidConfigException}.
+ *
+ * <p>Each problem is prefixed with its section, for example {@code pool.maxSize}.
+ */
 public final class ConfigValidator {
 
     private final String section;

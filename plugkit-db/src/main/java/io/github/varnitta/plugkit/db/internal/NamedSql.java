@@ -8,6 +8,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * Parses {@code :name} placeholders into JDBC {@code ?} placeholders and binds {@link
+ * io.github.varnitta.plugkit.db.Params} to them.
+ *
+ * <p>Placeholders inside string literals, quoted identifiers, comments and dollar-quoted text are left
+ * alone, as are {@code ::} casts.
+ */
 final class NamedSql {
 
     private static final Pattern DOLLAR_TAG = Pattern.compile("\\$[A-Za-z_]*\\$");

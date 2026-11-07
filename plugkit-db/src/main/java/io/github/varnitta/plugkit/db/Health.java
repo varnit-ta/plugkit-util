@@ -3,6 +3,13 @@ package io.github.varnitta.plugkit.db;
 import java.time.Duration;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * Result of a {@link Database#health()} check.
+ *
+ * @param healthy      whether a connection could be borrowed and answered in time
+ * @param responseTime how long the check took
+ * @param problem      why the check failed, or {@code null} when healthy
+ */
 public record Health(boolean healthy, Duration responseTime, @Nullable String problem) {
 
     public static Health up(Duration responseTime) {

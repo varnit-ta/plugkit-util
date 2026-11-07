@@ -3,6 +3,11 @@ package io.github.varnitta.plugkit.db.exception;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * A statement broke a database constraint.
+ *
+ * <p>{@link #constraintName()} names the constraint when the database reports it.
+ */
 public abstract class ConstraintViolation extends DatabaseException {
 
     private final @Nullable String constraintName;

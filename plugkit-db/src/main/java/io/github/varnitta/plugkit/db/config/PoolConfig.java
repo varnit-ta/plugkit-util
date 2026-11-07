@@ -8,6 +8,21 @@ import java.time.Duration;
 import lombok.Builder;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * Connection pool settings.
+ *
+ * <p>Defaults: {@code maxSize} 10, {@code minIdle} equal to {@code maxSize}, {@code acquireTimeout}
+ * 5s, {@code maxLifetime} 30m, {@code idleTimeout} 10m, {@code keepalive} 2m, {@code leakDetection}
+ * 60s. Values below the pool's own minimums are rejected instead of being silently adjusted.
+ *
+ * @param maxSize        the most connections the pool opens
+ * @param minIdle        idle connections kept open; equal to {@code maxSize} gives a fixed-size pool
+ * @param acquireTimeout how long a caller waits for a free connection; at least 250ms
+ * @param maxLifetime    connections are replaced after this age; at least 30s
+ * @param idleTimeout    idle connections above {@code minIdle} are closed after this; at least 10s
+ * @param keepalive      how often idle connections are pinged; at least 30s
+ * @param leakDetection  a connection held longer than this is logged as a possible leak; at least 2s
+ */
 public record PoolConfig(
         int maxSize,
         int minIdle,

@@ -8,6 +8,18 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * Immutable named parameters for a SQL statement.
+ *
+ * <p>Names match {@code :name} placeholders in the SQL. Values may be {@code null}. A
+ * {@link java.util.Collection} value expands into a comma-separated list for {@code IN} clauses.
+ *
+ * <pre>{@code
+ * Params.of("status", "ACTIVE").and("ids", List.of(1, 2, 3))
+ * }</pre>
+ *
+ * <p>{@link #toString()} lists parameter names only, so values never appear in logs.
+ */
 public final class Params {
 
     private static final Pattern NAME = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");

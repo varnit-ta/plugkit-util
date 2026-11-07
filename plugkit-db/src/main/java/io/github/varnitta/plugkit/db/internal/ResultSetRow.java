@@ -11,6 +11,9 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
+/**
+ * {@link io.github.varnitta.plugkit.db.Row} view over the current row of a {@link java.sql.ResultSet}.
+ */
 final class ResultSetRow implements Row {
 
     private final ResultSet resultSet;

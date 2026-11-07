@@ -4,6 +4,13 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.Optional;
 
+/**
+ * The databases plugkit-db supports.
+ *
+ * <p>The type is usually inferred from the JDBC URL with {@link #fromUrl(String)}; wrapper prefixes such
+ * as {@code jdbc:aws-wrapper:postgresql:} are skipped. In configuration it is written as
+ * {@link #configName()}, for example {@code type: postgres}.
+ */
 public enum DatabaseType {
 
     POSTGRES("postgresql");

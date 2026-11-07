@@ -25,6 +25,12 @@ import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * The {@link io.github.varnitta.plugkit.db.Database} implementation backed by a HikariCP pool.
+ *
+ * <p>Runs startup checks, borrows a connection per call, translates errors through the dialect and
+ * reports pool exhaustion as {@link io.github.varnitta.plugkit.db.exception.AcquireTimeout}.
+ */
 public final class PooledDatabase implements Database {
 
     private static final Logger LOG = LoggerFactory.getLogger(PooledDatabase.class);
