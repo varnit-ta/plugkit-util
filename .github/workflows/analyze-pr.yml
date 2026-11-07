@@ -1,0 +1,80 @@
+name: Analyze Pull Requests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: analyze-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MIN_NEW_CODE_COVERAGE: 95
+
+jobs:
+  pr-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ["21", "25"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+
+      - name: Run tests with coverage
+        run: ./mvnw -B -ntp verify
+
+      - name: Measure coverage of new code
+        if: matrix.java == '21'
+        id: coverage
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set +e
+          python3 .github/scripts/new_code_coverage.py \
+            --base "origin/${BASE_REF}" \
+            --threshold "${MIN_NEW_CODE_COVERAGE}" \
+            --output coverage.md
+          echo "status=$?" >> "${GITHUB_OUTPUT}"
+          if [ -f coverage.md ]; then cat coverage.md >> "${GITHUB_STEP_SUMMARY}"; fi
+          exit 0
+
+      - name: Post or update PR comment
+        if: always() && matrix.java == '21' && hashFiles('coverage.md') != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          marker='<!-- plugkit:new-code-coverage -->'
+          comment_id=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" | head -n 1)
+          if [ -n "${comment_id}" ]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${comment_id}" -F body=@coverage.md > /dev/null
+          else
+            gh api -X POST "repos/${REPO}/issues/${PR}/comments" -F body=@coverage.md > /dev/null
+          fi
+
+      - name: Enforce minimum coverage
+        if: matrix.java == '21'
+        env:
+          STATUS: ${{ steps.coverage.outputs.status }}
+        run: |
+          case "${STATUS}" in
+            0) echo "New code coverage OK" ;;
+            1) echo "New code coverage below ${MIN_NEW_CODE_COVERAGE}% (or a module has no coverage data). See the PR comment."; exit 1 ;;
+            *) echo "Coverage check could not run (setup problem). See the step log above."; exit 1 ;;
+          esac

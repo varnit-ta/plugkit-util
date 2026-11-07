@@ -1,0 +1,111 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["**"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version for main, e.g. 1.0.0 (empty = next minor)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash .github/scripts/version.sh
+
+  test:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ["21", "25"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      - name: Build and test
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: ./mvnw -B -ntp verify -Drevision="${VERSION}"
+
+  publish:
+    needs: [version, test]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: publish-${{ needs.version.outputs.version }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          server-id: github
+
+      - name: Set version in pom.xml (hotfix)
+        if: startsWith(github.ref_name, 'hotfix/')
+        run: |
+          current=$(sed -nE 's#^[[:space:]]*<revision>([^<]+)</revision>.*#\1#p' pom.xml | head -n 1)
+          if [ "${current}" != "${VERSION}" ]; then
+            sed -i -E "0,/<revision>/ s#<revision>[^<]*</revision>#<revision>${VERSION}</revision>#" pom.xml
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore: set version to ${VERSION}"
+            git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
+          fi
+
+      - name: Reserve release tag
+        if: needs.version.outputs.release == 'true'
+        run: |
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Publish to GitHub Packages
+        id: deploy
+        run: ./mvnw -B -ntp deploy -DskipTests -Drevision="${VERSION}"
+
+      - name: Create GitHub Release
+        if: needs.version.outputs.release == 'true'
+        run: gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes
+
+      - name: Remove tag if publishing failed
+        if: failure() && steps.deploy.outcome == 'failure' && needs.version.outputs.release == 'true'
+        run: git push --delete origin "v${VERSION}" || true
