@@ -30,6 +30,7 @@ jobs:
 
   test:
     needs: version
+    if: startsWith(github.ref_name, 'hotfix/')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -50,7 +51,11 @@ jobs:
 
   publish:
     needs: [version, test]
-    if: needs.version.outputs.publish == 'true'
+    if: >-
+      always()
+      && needs.version.result == 'success'
+      && (needs.test.result == 'success' || needs.test.result == 'skipped')
+      && needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
