@@ -77,6 +77,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ssh-key: ${{ github.ref_name == 'main' && secrets.RELEASE_DEPLOY_KEY || '' }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -84,15 +85,15 @@ jobs:
           cache: maven
           server-id: github
 
-      - name: Set version in pom.xml (hotfix)
-        if: startsWith(github.ref_name, 'hotfix/')
+      - name: Set version in pom.xml
+        if: needs.version.outputs.release == 'true'
         run: |
           current=$(sed -nE 's#^[[:space:]]*<revision>([^<]+)</revision>.*#\1#p' pom.xml | head -n 1)
           if [ "${current}" != "${VERSION}" ]; then
             sed -i -E "0,/<revision>/ s#<revision>[^<]*</revision>#<revision>${VERSION}</revision>#" pom.xml
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "chore: set version to ${VERSION}"
+            git commit -am "chore: release ${VERSION} [skip ci]"
             git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"
           fi
 
