@@ -30,6 +30,8 @@
     <maven-failsafe-plugin.version>3.5.3</maven-failsafe-plugin.version>
     <flatten-maven-plugin.version>1.7.0</flatten-maven-plugin.version>
     <jacoco-maven-plugin.version>0.8.13</jacoco-maven-plugin.version>
+    <maven-source-plugin.version>3.4.0</maven-source-plugin.version>
+    <maven-javadoc-plugin.version>3.12.0</maven-javadoc-plugin.version>
 
     <lombok.version>1.18.42</lombok.version>
     <jspecify.version>1.0.0</jspecify.version>
@@ -40,6 +42,8 @@
     <spring-boot.version>4.1.2</spring-boot.version>
     <spring-framework.version>7.0.10</spring-framework.version>
     <micrometer.version>1.17.2</micrometer.version>
+    <archunit.version>1.5.1</archunit.version>
+    <toxiproxy-java.version>2.1.11</toxiproxy-java.version>
     <junit.version>5.13.4</junit.version>
     <assertj.version>3.27.4</assertj.version>
   </properties>
@@ -133,6 +137,16 @@
         <groupId>org.assertj</groupId>
         <artifactId>assertj-core</artifactId>
         <version>${assertj.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId>
+        <artifactId>archunit-junit5</artifactId>
+        <version>${archunit.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>eu.rekawek.toxiproxy</groupId>
+        <artifactId>toxiproxy-java</artifactId>
+        <version>${toxiproxy-java.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>
@@ -239,6 +253,32 @@
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>${maven-source-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar-no-fork</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>${maven-javadoc-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
         <version>${maven-enforcer-plugin.version}</version>
         <executions>
@@ -255,6 +295,7 @@
                 <requireJavaVersion>
                   <version>[21,)</version>
                 </requireJavaVersion>
+                <dependencyConvergence/>
               </rules>
             </configuration>
           </execution>

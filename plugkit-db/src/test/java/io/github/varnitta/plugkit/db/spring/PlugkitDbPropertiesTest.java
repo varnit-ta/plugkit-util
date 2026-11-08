@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 class PlugkitDbPropertiesTest {
 
     private static final PlugkitDbProperties.Pool NO_POOL =
-            new PlugkitDbProperties.Pool(null, null, null, null, null, null, null);
+            new PlugkitDbProperties.Pool(null, null, null, null, null, null, null, null);
     private static final PlugkitDbProperties.Session NO_SESSION = new PlugkitDbProperties.Session(null, null, null);
     private static final PlugkitDbProperties.Tx NO_TX = new PlugkitDbProperties.Tx(null);
 
@@ -29,7 +29,7 @@ class PlugkitDbPropertiesTest {
         PlugkitDbProperties properties = new PlugkitDbProperties(DatabaseType.POSTGRES,
                 "jdbc:postgresql://localhost/app", "app", "secret", "orders",
                 new PlugkitDbProperties.Pool(20, 5, Duration.ofSeconds(2), Duration.ofMinutes(20),
-                        Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofSeconds(30)),
+                        Duration.ofMinutes(5), Duration.ofMinutes(1), Duration.ofSeconds(30), Duration.ofSeconds(20)),
                 new PlugkitDbProperties.Session(Duration.ofSeconds(10), Duration.ofSeconds(3), Duration.ofSeconds(20)),
                 new PlugkitDbProperties.Tx(Duration.ofMinutes(2)),
                 Duration.ofMillis(500), Map.of("sslmode", "require"));
@@ -43,6 +43,7 @@ class PlugkitDbPropertiesTest {
         assertThat(config.pool().maxSize()).isEqualTo(20);
         assertThat(config.pool().minIdle()).isEqualTo(5);
         assertThat(config.pool().leakDetection()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(config.pool().shutdownTimeout()).isEqualTo(Duration.ofSeconds(20));
         assertThat(config.session().statementTimeout()).isEqualTo(Duration.ofSeconds(10));
         assertThat(config.session().lockTimeout()).isEqualTo(Duration.ofSeconds(3));
         assertThat(config.tx().defaultTimeout()).isEqualTo(Duration.ofMinutes(2));

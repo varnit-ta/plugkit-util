@@ -25,6 +25,7 @@ class PoolConfigTest {
         assertThat(pool.idleTimeout()).isEqualTo(Duration.ofMinutes(10));
         assertThat(pool.keepalive()).isEqualTo(Duration.ofMinutes(2));
         assertThat(pool.leakDetection()).isEqualTo(Duration.ofSeconds(60));
+        assertThat(pool.shutdownTimeout()).isEqualTo(Duration.ofSeconds(10));
     }
 
     @Test
@@ -49,6 +50,7 @@ class PoolConfigTest {
                                 .leakDetection(Duration.ofSeconds(30)),
                         "pool.keepalive must be less than pool.maxLifetime (1m), was 2m"),
                 invalid(b -> b.leakDetection(Duration.ofSeconds(1)), "pool.leakDetection must be at least 2s, was 1s"),
+                invalid(b -> b.shutdownTimeout(Duration.ofSeconds(-1)), "pool.shutdownTimeout must be at least 0ms, was -1s"),
                 invalid(b -> b.leakDetection(Duration.ofHours(1)),
                         "pool.leakDetection must be less than pool.maxLifetime (30m), was 60m"));
     }
@@ -61,6 +63,11 @@ class PoolConfigTest {
 
         assertThat(configProblemsThrownBy(builder::build))
                 .containsExactly(expectedProblem);
+    }
+
+    @Test
+    void zeroShutdownTimeoutIsAllowed() {
+        assertThat(PoolConfig.builder().shutdownTimeout(Duration.ZERO).build().shutdownTimeout()).isZero();
     }
 
     @Test

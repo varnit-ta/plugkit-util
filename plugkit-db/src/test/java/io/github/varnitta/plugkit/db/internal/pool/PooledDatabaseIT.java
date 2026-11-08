@@ -9,16 +9,22 @@ import io.github.varnitta.plugkit.db.Databases;
 import io.github.varnitta.plugkit.db.Health;
 import io.github.varnitta.plugkit.db.TestPostgres;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
+import io.github.varnitta.plugkit.db.config.PoolConfig;
 import io.github.varnitta.plugkit.db.config.SessionConfig;
 import io.github.varnitta.plugkit.db.exception.ConnectionLost;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
 import io.github.varnitta.plugkit.db.exception.StatementTimeout;
 import io.github.varnitta.plugkit.db.internal.dialect.postgres.PostgresDialect;
+import io.github.varnitta.plugkit.db.sql.Params;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -113,6 +119,43 @@ class PooledDatabaseIT {
 
         assertThat(health.healthy()).isFalse();
         assertThat(health.problem()).contains("pool=it");
+    }
+
+    @Test
+    void closeWaitsForRunningQueriesThenRejectsNewWork() throws Exception {
+        Database db = Databases.create(config().poolName("graceful").build());
+        CompletableFuture<List<Integer>> running = CompletableFuture.supplyAsync(() ->
+                db.query("select 1 as one from pg_sleep(1)", Params.empty(), row -> row.getInt("one")));
+        Thread.sleep(200);
+
+        long start = System.nanoTime();
+        db.close();
+        Duration closing = Duration.ofNanos(System.nanoTime() - start);
+
+        assertThat(running.get(5, TimeUnit.SECONDS)).containsExactly(1);
+        assertThat(closing).isGreaterThan(Duration.ofMillis(500));
+        assertThatThrownBy(() -> db.query("select 1", Params.empty(), row -> 1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Database pool 'graceful' is closed");
+    }
+
+    @Test
+    void closeStopsWaitingAfterTheShutdownTimeout() throws Exception {
+        Database db = Databases.create(config()
+                .poolName("impatient")
+                .pool(PoolConfig.builder().maxSize(2).shutdownTimeout(Duration.ofMillis(200)).build())
+                .build());
+        CompletableFuture<List<Integer>> running = CompletableFuture.supplyAsync(() ->
+                db.query("select 1 as one from pg_sleep(5)", Params.empty(), row -> row.getInt("one")));
+        Thread.sleep(200);
+
+        long start = System.nanoTime();
+        db.close();
+
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(4));
+        assertThatThrownBy(() -> running.get(10, TimeUnit.SECONDS))
+                .isInstanceOf(ExecutionException.class)
+                .hasCauseInstanceOf(DatabaseException.class);
     }
 
     private static DatabaseConfig.DatabaseConfigBuilder config() {

@@ -65,7 +65,8 @@ public record PlugkitDbProperties(
      * @param maxLifetime    connections are replaced after this age
      * @param idleTimeout    idle connections above {@code minIdle} are closed after this
      * @param keepalive      how often idle connections are pinged
-     * @param leakDetection  a connection held longer than this is logged as a possible leak
+     * @param leakDetection   a connection held longer than this is logged as a possible leak
+     * @param shutdownTimeout how long closing waits for running work before closing the pool
      */
     public record Pool(
             @Nullable Integer maxSize,
@@ -74,7 +75,8 @@ public record PlugkitDbProperties(
             @Nullable Duration maxLifetime,
             @Nullable Duration idleTimeout,
             @Nullable Duration keepalive,
-            @Nullable Duration leakDetection) {
+            @Nullable Duration leakDetection,
+            @Nullable Duration shutdownTimeout) {
     }
 
     /**
@@ -113,6 +115,7 @@ public record PlugkitDbProperties(
                         .idleTimeout(pool.idleTimeout())
                         .keepalive(pool.keepalive())
                         .leakDetection(pool.leakDetection())
+                        .shutdownTimeout(pool.shutdownTimeout())
                         .build())
                 .session(SessionConfig.builder()
                         .statementTimeout(session.statementTimeout())

@@ -42,6 +42,10 @@ public final class ConfigValidator {
                 "must be at least " + formatDuration(minimum) + ", was " + formatDuration(value));
     }
 
+    public ConfigValidator requireNotNegative(String key, Duration value) {
+        return requireAtLeast(key, value, Duration.ZERO);
+    }
+
     public ConfigValidator requirePositive(String key, Duration value) {
         return requireAtLeast(key, value, Duration.ofMillis(1));
     }

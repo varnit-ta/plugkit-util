@@ -31,7 +31,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import javax.sql.DataSource;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -45,6 +47,9 @@ import org.slf4j.LoggerFactory;
  * Statements get their connection from a {@link ConnectionProvider}, so an integration can make them
  * join its transactions. Errors are translated through the dialect, pool exhaustion is reported as
  * {@link AcquireTimeout}, and transactions are handed to {@link TransactionRunner}.
+ *
+ * <p>{@link #close()} stops new work, waits up to {@code pool.shutdownTimeout} for running statements
+ * and transactions, then closes the pool if it owns it.
  */
 public final class PooledDatabase implements Database {
 
@@ -61,6 +66,8 @@ public final class PooledDatabase implements Database {
     private final MetricsRecorder metrics;
     private final StatementExecutor executor;
     private final TransactionRunner transactions;
+    private final InFlightTracker inFlight;
+    private final AtomicBoolean closing = new AtomicBoolean();
 
     private PooledDatabase(DatabaseConfig config, Dialect dialect, DataSource dataSource, boolean ownsPool,
                            Function<DataSource, ConnectionProvider> providers, MetricsRecorder metrics) {
@@ -73,6 +80,7 @@ public final class PooledDatabase implements Database {
         this.connections = new TranslatingProvider(providers.apply(dataSource));
         this.executor = new StatementExecutor(config.poolName(), config.slowQueryThreshold());
         this.transactions = new TransactionRunner(connections, dialect, config, executor, metrics);
+        this.inFlight = new InFlightTracker(config.poolName());
     }
 
     public static PooledDatabase start(DatabaseConfig config, MetricsRecorder.Factory metrics,
@@ -103,8 +111,8 @@ public final class PooledDatabase implements Database {
         if (TimeoutOverrides.statement() != null) {
             return inTransaction(transaction -> transaction.query(sql, params, mapper));
         }
-        return withConnection("query", connection -> executor.query(connection, sql, params, mapper, 0,
-                StatementExecutor.NO_QUERY_TIMEOUT));
+        return tracked(() -> withConnection("query", connection -> executor.query(connection, sql, params, mapper,
+                0, StatementExecutor.NO_QUERY_TIMEOUT)));
     }
 
     @Override
@@ -112,8 +120,8 @@ public final class PooledDatabase implements Database {
         if (TimeoutOverrides.statement() != null) {
             return inTransaction(transaction -> transaction.queryOne(sql, params, mapper));
         }
-        return withConnection("queryOne", connection -> executor.queryOne(connection, sql, params, mapper,
-                StatementExecutor.NO_QUERY_TIMEOUT));
+        return tracked(() -> withConnection("queryOne", connection -> executor.queryOne(connection, sql, params,
+                mapper, StatementExecutor.NO_QUERY_TIMEOUT)));
     }
 
     @Override
@@ -121,8 +129,8 @@ public final class PooledDatabase implements Database {
         if (TimeoutOverrides.statement() != null) {
             return inTransaction(transaction -> transaction.update(sql, params));
         }
-        return withConnection("update", connection -> executor.update(connection, sql, params,
-                StatementExecutor.NO_QUERY_TIMEOUT));
+        return tracked(() -> withConnection("update", connection -> executor.update(connection, sql, params,
+                StatementExecutor.NO_QUERY_TIMEOUT)));
     }
 
     @Override
@@ -135,7 +143,7 @@ public final class PooledDatabase implements Database {
 
     @Override
     public <T> T inTransaction(TxOptions options, Function<Transaction, T> work) {
-        return transactions.run(options, work);
+        return tracked(() -> transactions.run(options, work));
     }
 
     @Override
@@ -163,10 +171,24 @@ public final class PooledDatabase implements Database {
 
     @Override
     public void close() {
+        if (!closing.compareAndSet(false, true)) {
+            return;
+        }
+        Duration timeout = config.pool().shutdownTimeout();
+        try {
+            if (!inFlight.closeAndAwait(timeout)) {
+                LOG.warn("Closing database pool '{}' with {} statements or transactions still running after "
+                        + "waiting {} ms", config.poolName(), inFlight.active(), timeout.toMillis());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warn("Interrupted while waiting for running work on database pool '{}'; closing now",
+                    config.poolName());
+        }
         if (ownsPool && hikari != null && !hikari.isClosed()) {
             hikari.close();
-            LOG.info("Stopped database pool '{}'", config.poolName());
         }
+        LOG.info("Stopped database pool '{}'", config.poolName());
     }
 
     public DataSource dataSource() {
@@ -175,6 +197,15 @@ public final class PooledDatabase implements Database {
 
     static boolean isLargeShare(int maxSize, int maxConnections) {
         return maxSize * 2L > maxConnections;
+    }
+
+    private <T> T tracked(Supplier<T> work) {
+        inFlight.enter();
+        try {
+            return work.get();
+        } finally {
+            inFlight.exit();
+        }
     }
 
     private <T> T withConnection(String operation, ConnectionWork<T> work) {
