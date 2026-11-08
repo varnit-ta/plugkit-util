@@ -1,12 +1,12 @@
 package io.github.varnitta.plugkit.db.internal.tx;
 
-import static java.util.Objects.requireNonNullElse;
-
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.exception.CommitOutcomeUnknown;
 import io.github.varnitta.plugkit.db.exception.ConnectionLost;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
+import io.github.varnitta.plugkit.db.internal.connection.ConnectionProvider;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
+import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
 import io.github.varnitta.plugkit.db.internal.statement.StatementExecutor;
 import io.github.varnitta.plugkit.db.tx.Transaction;
 import io.github.varnitta.plugkit.db.tx.TxOptions;
@@ -15,6 +15,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,90 +26,121 @@ import org.slf4j.LoggerFactory;
  * new transaction, up to {@code maxAttempts}, with {@link Backoff} between attempts; each attempt gets
  * the full timeout. Any other exception rolls back and is rethrown unchanged. A connection lost during
  * commit becomes {@link CommitOutcomeUnknown} and is never retried.
+ *
+ * <p>When the {@link ConnectionProvider} returns a connection whose transaction is managed elsewhere,
+ * for example by Spring's {@code @Transactional}, the callback joins that transaction: no begin, commit,
+ * rollback or retry, and isolation and read-only settings are left to the outer transaction.
  */
 public final class TransactionRunner {
 
     private static final Logger LOG = LoggerFactory.getLogger(TransactionRunner.class);
     private static final Duration NETWORK_TIMEOUT_MARGIN = Duration.ofSeconds(5);
 
-    private final ConnectionSource connections;
+    private final ConnectionProvider connections;
     private final Dialect dialect;
     private final DatabaseConfig config;
     private final StatementExecutor executor;
+    private final MetricsRecorder metrics;
 
-    public TransactionRunner(ConnectionSource connections, Dialect dialect, DatabaseConfig config,
-                      StatementExecutor executor) {
+    public TransactionRunner(ConnectionProvider connections, Dialect dialect, DatabaseConfig config,
+                             StatementExecutor executor, MetricsRecorder metrics) {
         this.connections = connections;
         this.dialect = dialect;
         this.config = config;
         this.executor = executor;
-    }
-
-    @FunctionalInterface
-    public interface ConnectionSource {
-        Connection acquire() throws SQLException;
+        this.metrics = metrics;
     }
 
     public <T> T run(TxOptions options, Function<Transaction, T> work) {
+        boolean[] joined = {false};
         for (int attempt = 1; ; attempt++) {
+            long start = System.nanoTime();
             try {
-                return attempt(options, work);
-            } catch (DatabaseException e) {
-                if (!e.isRetryable() || attempt >= options.maxAttempts()) {
+                T result = attempt(options, work, joined);
+                metrics.transaction(elapsedSince(start), null);
+                return result;
+            } catch (RuntimeException e) {
+                metrics.transaction(elapsedSince(start), e);
+                if (!(e instanceof DatabaseException failure) || !failure.isRetryable() || joined[0]
+                        || attempt >= options.maxAttempts()) {
                     throw e;
                 }
+                metrics.retry(failure);
                 LOG.info("Retrying transaction on pool '{}' after {} (attempt {} of {})", config.poolName(),
-                        e.getClass().getSimpleName(), attempt + 1, options.maxAttempts());
-                pause(Backoff.delay(attempt), e);
+                        failure.getClass().getSimpleName(), attempt + 1, options.maxAttempts());
+                pause(Backoff.delay(attempt), failure);
             }
         }
     }
 
-    private <T> T attempt(TxOptions options, Function<Transaction, T> work) {
-        Duration timeout = requireNonNullElse(options.timeout(), config.tx().defaultTimeout());
-        Duration statementTimeout = requireNonNullElse(options.statementTimeout(),
+    private <T> T attempt(TxOptions options, Function<Transaction, T> work, boolean[] joined) {
+        Duration timeout = firstNonNull(options.timeout(), TimeoutOverrides.transaction(),
+                config.tx().defaultTimeout());
+        Duration statementTimeout = firstNonNull(options.statementTimeout(), TimeoutOverrides.statement(),
                 config.session().statementTimeout());
         long deadlineNanos = System.nanoTime() + timeout.toNanos();
-        try (Connection connection = connections.acquire()) {
-            ConnectionTransaction transaction = new ConnectionTransaction(connection, executor, dialect,
-                    config.poolName(), timeout, statementTimeout, deadlineNanos);
+        try {
+            Connection connection = connections.acquire();
             try {
-                begin(connection, options, statementTimeout);
-                T result = work.apply(transaction);
-                transaction.deactivate();
-                if (transaction.deadlinePassed()) {
-                    throw transaction.timeoutFailure(null);
+                ConnectionTransaction transaction = new ConnectionTransaction(connection, executor, dialect,
+                        config.poolName(), metrics, timeout, statementTimeout, deadlineNanos);
+                if (connections.isExternallyManaged(connection)) {
+                    joined[0] = true;
+                    return runJoined(connection, transaction, statementTimeout, work);
                 }
-                commit(connection);
-                return result;
-            } catch (SQLException e) {
-                rollbackQuietly(connection, e);
-                throw dialect.translate(e, config.poolName());
-            } catch (RuntimeException e) {
-                rollbackQuietly(connection, e);
-                throw e;
+                return runOwn(connection, transaction, options, statementTimeout, work);
             } finally {
-                transaction.deactivate();
+                connections.release(connection);
             }
         } catch (SQLException e) {
             throw dialect.translate(e, config.poolName());
         }
     }
 
-    private void begin(Connection connection, TxOptions options, Duration statementTimeout) throws SQLException {
-        connection.setAutoCommit(false);
-        if (options.isolation() != null) {
-            connection.setTransactionIsolation(options.isolation().jdbcLevel());
+    private <T> T runOwn(Connection connection, ConnectionTransaction transaction, TxOptions options,
+                         Duration statementTimeout, Function<Transaction, T> work) throws SQLException {
+        try {
+            connection.setAutoCommit(false);
+            if (options.isolation() != null) {
+                connection.setTransactionIsolation(options.isolation().jdbcLevel());
+            }
+            if (options.readOnly()) {
+                connection.setReadOnly(true);
+            }
+            applyStatementTimeout(connection, statementTimeout);
+            T result = work.apply(transaction);
+            transaction.deactivate();
+            if (transaction.deadlinePassed()) {
+                throw transaction.timeoutFailure(null);
+            }
+            commit(connection);
+            return result;
+        } catch (SQLException | RuntimeException e) {
+            rollbackQuietly(connection, e);
+            throw e;
+        } finally {
+            transaction.deactivate();
         }
-        if (options.readOnly()) {
-            connection.setReadOnly(true);
+    }
+
+    private <T> T runJoined(Connection connection, ConnectionTransaction transaction, Duration statementTimeout,
+                            Function<Transaction, T> work) throws SQLException {
+        try {
+            applyStatementTimeout(connection, statementTimeout);
+            return work.apply(transaction);
+        } finally {
+            transaction.deactivate();
         }
-        if (options.statementTimeout() != null) {
+    }
+
+    private void applyStatementTimeout(Connection connection, Duration statementTimeout) throws SQLException {
+        Duration sessionTimeout = config.session().statementTimeout();
+        if (!statementTimeout.equals(sessionTimeout)) {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(dialect.localStatementTimeoutSql(statementTimeout));
             }
         }
-        if (statementTimeout.compareTo(config.session().statementTimeout()) > 0) {
+        if (statementTimeout.compareTo(sessionTimeout) > 0) {
             connection.setNetworkTimeout(Runnable::run,
                     Math.toIntExact(statementTimeout.plus(NETWORK_TIMEOUT_MARGIN).toMillis()));
         }
@@ -125,6 +157,18 @@ public final class TransactionRunner {
             }
             throw translated;
         }
+    }
+
+    private static Duration firstNonNull(@Nullable Duration explicit, @Nullable Duration override,
+                                         Duration fallback) {
+        if (explicit != null) {
+            return explicit;
+        }
+        return override != null ? override : fallback;
+    }
+
+    private static Duration elapsedSince(long startNanos) {
+        return Duration.ofNanos(System.nanoTime() - startNanos);
     }
 
     private static void rollbackQuietly(Connection connection, Exception original) {

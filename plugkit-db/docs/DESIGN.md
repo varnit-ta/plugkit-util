@@ -20,8 +20,8 @@ engine, every dialect and the Spring auto-configuration.
 | Dependency | Scope | Why |
 |---|---|---|
 | HikariCP, SLF4J API | compile | Pool and logging API |
-| Spring Boot | optional | Auto-configuration activates only when Spring Boot is on the classpath |
-| Micrometer | optional | Metrics are recorded only when Micrometer is on the classpath |
+| Spring Boot (`spring-boot-autoconfigure`, `spring-boot-health`), `spring-jdbc` | optional | Auto-configuration activates only when they are on the classpath |
+| Micrometer | optional | Used only by `MeteredDatabases` and the Spring integration |
 | Lombok | provided | Compile-time builders; not on the user's classpath |
 | PostgreSQL JDBC driver | optional | Compiled against, to read constraint names from `PSQLException`; only touched when `type` is `postgres` |
 | JDBC driver | not included | The user adds the driver for their database |
@@ -57,10 +57,11 @@ flowchart TD
 - **DataSource-first.** The engine only ever calls `DataSource.getConnection()`.
 - **Built from config.** `Databases.create(DatabaseConfig)` builds a `HikariDataSource` with the
   defaults in [section 5](#5-configuration).
-- **Bring your own.** `Databases.create(DataSource)` uses an existing pool as it is. plugkit-db
-  can't apply its session and driver settings to a pool it didn't build, so only the engine-level
-  watchdogs (transaction deadline, per-statement query timeout) apply. Built together with the Spring
-  integration, which needs it.
+- **Bring your own.** `Databases.create(DataSource)` uses an existing pool as it is. The database
+  type is read from a connection's metadata URL, and the pool name from Hikari when the pool is a
+  `HikariDataSource`. plugkit-db can't apply its session and driver settings to a pool it didn't
+  build, so only the engine-level watchdogs (transaction deadline, per-statement query timeout) apply.
+  Closing the `Database` leaves the pool open.
 - **Cloud agnostic through drivers.** Cloud authentication, failover and TLS come from the vendor's
   JDBC driver or plugin, configured through the URL and `driverProperties`. plugkit-db has no
   cloud-specific code.
@@ -312,6 +313,9 @@ and reruns the whole callback in a new transaction with a fresh deadline. The wa
 is random between 0 and `min(2s, 50ms × 2^(n-1))` (full jitter). Single statements are never retried
 on their own; other exceptions are never retried.
 
+**Joined transactions.** When the connection already belongs to a transaction managed elsewhere
+(Spring, see section 11), the callback joins it instead of starting its own.
+
 **Escaped transactions.** A `Transaction` used after its callback returns throws
 `IllegalStateException`. Calling `db.inTransaction` inside a callback opens a separate transaction on
 another connection.
@@ -380,23 +384,13 @@ parameter values don't appear. The engine adds the pool name.
 
 ## 11. Spring integration
 
-- Lives in the `spring` package of the same artifact and targets Spring Boot 4.
-- Auto-configuration registered in `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`,
-  guarded by `@ConditionalOnClass`, so it does nothing when Spring Boot isn't present.
-- Creates a `Database` bean from `plugkit.db.*`.
-- `@ConfigurationProperties("plugkit.db")` with generated metadata for IDE autocomplete.
-- Every bean is `@ConditionalOnMissingBean`.
-- If the application already defines a `DataSource` bean, plugkit-db wraps it instead of building a
-  second pool.
-- **Joins Spring transactions.** Inside a Spring `@Transactional` method, `Database` calls use
-  Spring's current connection and transaction. plugkit-db has no transaction annotation of its own.
-- Spring's `@Transactional(readOnly = true)` is the read-only/replica hint. It calls
-  `setReadOnly(true)`, which vendor plugins such as the AWS wrapper use for read/write splitting.
+Spring Boot 4 support lives in the same artifact and activates only when Spring Boot and
+`spring-jdbc` are on the classpath. Three auto-configurations are registered in
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
 
 ```yaml
 plugkit:
   db:
-    type: postgres
     url: jdbc:postgresql://localhost:5432/app
     user: app
     password: ${DB_PASSWORD}
@@ -408,12 +402,45 @@ plugkit:
       sslmode: require
 ```
 
+```java
+@Service
+class OrderService {
+    private final Database db;
+    OrderService(Database db) { this.db = db; }
+}
+```
+
+### Modes
+
+| Situation | What plugkit-db does |
+|---|---|
+| `plugkit.db.url` set | Builds its own pool from `plugkit.db.*` and registers it as the application's `DataSource` bean (unless one exists). Runs before Boot's DataSource auto-configuration, which backs off, so Boot's transaction manager, `@Transactional` and Flyway all use the same pool |
+| No `plugkit.db.url`, one `DataSource` bean (from `spring.datasource.*` or the application) | Wraps that pool with `Databases.create(DataSource)`. Runs after Boot's DataSource auto-configuration. The pool keeps its own settings and is closed by Spring, not by plugkit-db |
+| Neither | No `Database` bean |
+
+- `@ConfigurationProperties("plugkit.db")` is a record mapped one-to-one onto `DatabaseConfig`;
+  unset values use the same defaults. Metadata for IDE autocomplete is generated.
+- Every bean is `@ConditionalOnMissingBean`, so an application can define its own.
+
+### Joining Spring transactions
+
+Statements get their connection through Spring's `DataSourceUtils`. Inside a Spring transaction on
+the same `DataSource`, they use Spring's connection and transaction:
+
+- `query`, `update` and `batch` run inside the Spring transaction.
+- `inTransaction` joins it: no begin, commit, rollback or retry; isolation and read-only come from
+  `@Transactional`. A thrown exception rolls back the whole Spring transaction, as Spring decides.
+- Outside a Spring transaction, everything behaves as without Spring.
+- `@Transactional(readOnly = true)` is the read-only/replica hint; it calls `setReadOnly(true)`,
+  which vendor plugins such as the AWS wrapper use for read/write splitting.
+- `@Transactional(timeout = …)` isn't applied to plugkit-db statements; use `@Timeouts`.
+
 ### Annotations
 
 | Annotation | Behaviour |
 |---|---|
-| `@RetryOnTransient(maxAttempts = 3)` | Reruns the method in a new transaction on `TransientFailure`, with backoff and jitter |
-| `@Timeouts(statement = "5m", transaction = "10m")` | Overrides the timeouts for the transaction the method runs in |
+| `@RetryOnTransient(maxAttempts = 3)` | Reruns the method after a transient failure: a retryable plugkit-db exception, or Spring's `TransientDataAccessException` (which Spring's transaction manager throws for failures at commit). Backoff as in section 8. Not applied when a transaction is already active, because only the outermost transaction can be rerun |
+| `@Timeouts(statement = "5m", transaction = "10m")` | Overrides plugkit-db's statement and transaction timeouts while the method runs. Values use Spring Boot's duration format; empty keeps the default |
 
 ```java
 @RetryOnTransient(maxAttempts = 3)
@@ -425,27 +452,42 @@ public void transfer(long from, long to, BigDecimal amount) { }
 public Report monthlyReport(YearMonth month) { }
 ```
 
-The `@RetryOnTransient` advice is ordered outside Spring's transaction advice, so each attempt runs
-in a fresh transaction. Users don't configure the ordering.
+- Both work on methods and classes, and are implemented as Spring AOP advisors. The retry advisor is
+  ordered outside Spring's transaction advisor, so each attempt runs in a fresh transaction. If the
+  application has no auto-proxy creator, one with class proxying is registered.
+- `@Timeouts` sets per-thread overrides. Inside a transaction the statement timeout is applied with
+  `set local statement_timeout` and the network timeout is raised. Statements outside a transaction
+  run in their own short transaction so the limit can be applied.
+
+### Other beans
+
+- **Metrics:** if Micrometer and a `MeterRegistry` bean exist, metrics are recorded (section 12).
+- **Health:** `plugkitDbHealthIndicator` reports `Database.health()` as `plugkitDb`, with the
+  database type, pool name, response time and, when down, the problem.
 
 ## 12. Observability
 
-- **Logging:** SLF4J API only. INFO for pool start and stop; WARN for startup checks and slow
-  queries; per-query logging only at DEBUG. Parameter values are never logged.
-- **Metrics:** recorded when Micrometer is on the classpath.
+- **Logging:** SLF4J API only. INFO for pool start and stop and for retries; WARN for startup checks
+  and slow queries; per-query logging only at DEBUG. Parameter values are never logged.
+- **Metrics:** `MeteredDatabases.create(config, meterRegistry)` (or the Spring integration) records
+  to Micrometer. `Databases.create(...)` records nothing. Only `MeteredDatabases` and an internal
+  recorder reference Micrometer, so applications without it never load Micrometer classes.
 
 | Metric | Type | Tags |
 |---|---|---|
-| Hikari pool metrics (`hikaricp.*`) | gauges, timers | `pool` |
-| `plugkit.db.query` | timer | `pool`, `outcome` |
-| `plugkit.db.transaction` | timer | `pool`, `outcome` |
+| `plugkit.db.statement` | timer, per statement including waiting for a connection | `pool`, `operation` (`query`, `queryOne`, `update`, `batch`), `outcome` |
+| `plugkit.db.transaction` | timer, per transaction attempt | `pool`, `outcome` |
 | `plugkit.db.transaction.retries` | counter | `pool`, `reason` |
-| `plugkit.db.errors` | counter | `pool`, `type` |
+| `hikaricp.*` | HikariCP's pool gauges and timers, for pools plugkit-db builds | `pool` |
+
+`outcome` is `success`, the `DatabaseException` type (for example `UniqueViolation`), or
+`application_error` for any other exception. The tag values come from a fixed set, so they don't
+grow without bound. For a wrapped pool, plugkit-db doesn't register `hikaricp.*` meters; Spring Boot
+already does for its own pools.
 
 - **Health:** `Database.health()` borrows a connection and calls the driver's `isValid` (2s limit). It
   returns `Health(healthy, responseTime, problem)` and never throws; a closed pool or an unreachable
-  database is reported as unhealthy with the translated error message. The Spring
-  auto-configuration exposes it as a `HealthIndicator`.
+  database is reported as unhealthy with the translated error message.
 
 ## 13. Library practices
 
@@ -462,11 +504,15 @@ io.github.varnitta.plugkit.db
 ├── sql/           SqlOperations, Params, Row, RowMapper
 ├── tx/            Transaction, TxOptions, Isolation
 ├── exception/     DatabaseException hierarchy, InvalidConfigException
-├── spring/        auto-configuration, properties, annotations (planned)
+├── metrics/       MeteredDatabases (the only public class that uses Micrometer)
+├── spring/        PlugkitDbProperties, @RetryOnTransient, @Timeouts
 └── internal/      not exported
+    ├── connection/    ConnectionProvider, DataSourceConnectionProvider
+    ├── metrics/       MetricsRecorder, MicrometerMetricsRecorder
     ├── pool/          PooledDatabase, HikariPoolFactory, DriverCheck
     ├── statement/     StatementExecutor, NamedSql, ResultSetRow, UncheckedSqlException
-    ├── tx/            TransactionRunner, ConnectionTransaction, Backoff
+    ├── tx/            TransactionRunner, ConnectionTransaction, Backoff, TimeoutOverrides
+    ├── spring/        auto-configurations, SpringConnectionProvider, interceptors, health indicator
     ├── validation/    ConfigValidator
     └── dialect/       Dialect, Dialects
         └── postgres/  PostgresDialect
@@ -487,7 +533,8 @@ io.github.varnitta.plugkit.db
   `@Nullable`; an unset builder value is `null`, and the factory replaces it with the default before
   calling the constructor.
 - **Dependencies:** see [section 2](#2-artifact). The Maven enforcer checks `dependencyConvergence`.
-- **Lifecycle:** no static state. Each `Database` owns its pool. `close()` stops new work, waits
+- **Lifecycle:** no static state apart from the per-thread `@Timeouts` overrides, which are always
+  restored when the method returns. Each `Database` owns its pool unless it wraps one. `close()` stops new work, waits
   for in-flight work up to a timeout, then closes the pool.
 - **Virtual threads:** blocking paths use `ReentrantLock`, not `synchronized`.
 - **Compatibility:** semantic versioning. Removals follow at least one minor release of
@@ -498,7 +545,8 @@ io.github.varnitta.plugkit.db
 | Kind | Tooling | Covers |
 |---|---|---|
 | Unit | JUnit 5 | Config validation, parameter binding, row mapping, error translation, secret masking |
-| Integration (`*IT`) | Testcontainers PostgreSQL, failsafe; skipped when Docker is unavailable | Pool startup, session settings, startup failures, queries, transactions, timeouts, retry, Spring transaction join |
+| Integration (`*IT`) | Testcontainers PostgreSQL, failsafe; skipped when Docker is unavailable | Pool startup, session settings, startup failures, queries, transactions, timeouts, retry, metrics, wrapped pools |
+| Spring (`SpringIntegrationIT`) | `ApplicationContextRunner` with Boot's JDBC and transaction auto-configuration | Both modes, joining `@Transactional`, `@RetryOnTransient`, `@Timeouts`, health, metrics |
 | Contract | `DialectContractTest` | Behaviour every dialect must meet |
 | Failure | Testcontainers Toxiproxy | Network loss, latency, connection kill mid-transaction, pool recovery |
 

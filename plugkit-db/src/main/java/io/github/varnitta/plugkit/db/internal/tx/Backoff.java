@@ -9,7 +9,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>Before retry {@code n} (1-based) it waits a random time between 0 and
  * {@code min(MAX, BASE * 2^(n-1))}, which spreads competing transactions apart.
  */
-final class Backoff {
+public final class Backoff {
 
     static final Duration BASE = Duration.ofMillis(50);
     static final Duration MAX = Duration.ofSeconds(2);
@@ -22,7 +22,7 @@ final class Backoff {
         return Duration.ofMillis(Math.min(millis, MAX.toMillis()));
     }
 
-    static Duration delay(int retry) {
+    public static Duration delay(int retry) {
         return Duration.ofMillis(ThreadLocalRandom.current().nextLong(ceiling(retry).toMillis() + 1));
     }
 }

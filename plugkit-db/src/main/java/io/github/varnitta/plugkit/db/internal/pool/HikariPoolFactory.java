@@ -7,6 +7,7 @@ import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.config.PoolConfig;
 import io.github.varnitta.plugkit.db.exception.ConnectionLost;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
+import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
 import java.sql.SQLException;
 
 /**
@@ -19,9 +20,11 @@ final class HikariPoolFactory {
     private HikariPoolFactory() {
     }
 
-    static HikariDataSource start(DatabaseConfig config, Dialect dialect) {
+    static HikariDataSource start(DatabaseConfig config, Dialect dialect, MetricsRecorder metrics) {
+        HikariConfig hikari = hikariConfig(config, dialect);
+        metrics.configurePool(hikari);
         try {
-            return new HikariDataSource(hikariConfig(config, dialect));
+            return new HikariDataSource(hikari);
         } catch (PoolInitializationException e) {
             if (e.getCause() instanceof SQLException sqlException) {
                 throw dialect.translate(sqlException, config.poolName());

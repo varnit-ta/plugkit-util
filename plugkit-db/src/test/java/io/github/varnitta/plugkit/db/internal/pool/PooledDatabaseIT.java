@@ -40,7 +40,7 @@ class PooledDatabaseIT {
 
     @Test
     void appliesDefaultSessionTimeouts() throws SQLException {
-        try (PooledDatabase db = PooledDatabase.start(config().build())) {
+        try (PooledDatabase db = (PooledDatabase) Databases.create(config().build())) {
             assertThat(show(db, "statement_timeout")).isEqualTo("30s");
             assertThat(show(db, "lock_timeout")).isEqualTo("10s");
             assertThat(show(db, "idle_in_transaction_session_timeout")).isEqualTo("1min");
@@ -54,7 +54,7 @@ class PooledDatabaseIT {
                 .driverProperty("options", "-c search_path=custom")
                 .build();
 
-        try (PooledDatabase db = PooledDatabase.start(config)) {
+        try (PooledDatabase db = (PooledDatabase) Databases.create(config)) {
             assertThat(show(db, "statement_timeout")).isEqualTo("2500ms");
             assertThat(show(db, "search_path")).isEqualTo("custom");
         }
@@ -66,7 +66,7 @@ class PooledDatabaseIT {
                 .session(SessionConfig.builder().statementTimeout(Duration.ofSeconds(1)).build())
                 .build();
 
-        try (PooledDatabase db = PooledDatabase.start(config)) {
+        try (PooledDatabase db = (PooledDatabase) Databases.create(config)) {
             assertThatThrownBy(() -> {
                 try (Connection connection = db.dataSource().getConnection();
                      Statement statement = connection.createStatement()) {

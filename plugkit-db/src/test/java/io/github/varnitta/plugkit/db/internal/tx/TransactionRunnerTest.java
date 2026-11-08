@@ -6,7 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.exception.CommitOutcomeUnknown;
 import io.github.varnitta.plugkit.db.exception.SerializationFailure;
+import io.github.varnitta.plugkit.db.internal.connection.ConnectionProvider;
 import io.github.varnitta.plugkit.db.internal.dialect.postgres.PostgresDialect;
+import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
 import io.github.varnitta.plugkit.db.internal.statement.StatementExecutor;
 import io.github.varnitta.plugkit.db.tx.TxOptions;
 import java.lang.reflect.Proxy;
@@ -98,8 +100,24 @@ class TransactionRunnerTest {
     }
 
     private TransactionRunner runner() {
-        return new TransactionRunner(this::fakeConnection, new PostgresDialect(), CONFIG,
-                new StatementExecutor("unit", Duration.ofSeconds(1)));
+        ConnectionProvider provider = new ConnectionProvider() {
+            @Override
+            public Connection acquire() {
+                return fakeConnection();
+            }
+
+            @Override
+            public void release(Connection connection) throws SQLException {
+                connection.close();
+            }
+
+            @Override
+            public boolean isExternallyManaged(Connection connection) {
+                return false;
+            }
+        };
+        return new TransactionRunner(provider, new PostgresDialect(), CONFIG,
+                new StatementExecutor("unit", Duration.ofSeconds(1)), MetricsRecorder.none());
     }
 
     private Connection fakeConnection() {
