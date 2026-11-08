@@ -171,6 +171,7 @@ public interface Dialect {
     String driverArtifact();
     Map<String, String> connectionProperties(SessionConfig session, Map<String, String> userProperties);
     String maxConnectionsQuery();
+    String localStatementTimeoutSql(Duration statementTimeout);
     DatabaseException translate(SQLException exception, String poolName);
 }
 ```
@@ -179,7 +180,7 @@ public interface Dialect {
   with an exhaustive `switch`, so adding a `DatabaseType` constant fails to compile until a dialect
   is registered. There is no runtime discovery.
 - Adding a database means adding a `DatabaseType` constant, a dialect in
-  `io.github.varnitta.plugkit.db.dialect.<name>`, and its `switch` case.
+  `io.github.varnitta.plugkit.db.internal.dialect.<name>`, and its `switch` case.
 - `connectionProperties` merges the user's `driverProperties` with the properties plugkit-db
   manages, and rejects user values for managed keys.
 - When a second dialect ships: a `DialectContractTest` suite every dialect must pass, and a way for
@@ -201,21 +202,23 @@ Session settings travel in `options`, so they're applied at login with no extra 
 ## 7. Public API
 
 ```java
-public interface Database extends AutoCloseable {
+public interface SqlOperations {
     <T> List<T> query(String sql, Params params, RowMapper<T> mapper);
     <T> Optional<T> queryOne(String sql, Params params, RowMapper<T> mapper);
     int update(String sql, Params params);
     int[] batch(String sql, List<Params> rows);
+}
+
+public interface Database extends SqlOperations, AutoCloseable {
     <T> T inTransaction(TxOptions options, Function<Transaction, T> work);
+    default <T> T inTransaction(Function<Transaction, T> work) { }
+    DatabaseType type();
+    String poolName();
     Health health();
     void close();
 }
 
-public interface Transaction {
-    <T> List<T> query(String sql, Params params, RowMapper<T> mapper);
-    <T> Optional<T> queryOne(String sql, Params params, RowMapper<T> mapper);
-    int update(String sql, Params params);
-    int[] batch(String sql, List<Params> rows);
+public interface Transaction extends SqlOperations {
 }
 
 @FunctionalInterface
@@ -259,7 +262,7 @@ public final class Databases {
 | `query` | All rows, mapped |
 | `queryOne` | `Optional` of zero or one row; more than one throws `QueryFailure`. Fetches at most two rows. Works with `insert … returning` |
 | `update` | Row count; also for DDL |
-| `batch` | One prepared statement, executed as a single atomic transaction; returns per-row counts. Every row must expand to the same SQL. An empty list does nothing |
+| `batch` | One prepared statement; returns per-row counts. On `Database` it runs in its own transaction, so it's atomic; inside a `Transaction` it joins that transaction. Every row must expand to the same SQL. An empty list does nothing |
 
 - Outside a transaction each call borrows a connection, runs in auto-commit and returns it.
 - Pool exhausted: `AcquireTimeout` with pool stats and the fix, for example
@@ -271,23 +274,31 @@ public final class Databases {
 ## 8. Transactions
 
 ```java
-public record TxOptions(Isolation isolation, boolean readOnly, Duration timeout,
-                        Duration statementTimeout, int maxAttempts) {
-    public static TxOptions defaults() { }
-}
+db.inTransaction(TxOptions.builder().isolation(Isolation.SERIALIZABLE).maxAttempts(3).build(), tx -> {
+    tx.update("update accounts set balance = balance - :amt where id = :id", debit);
+    tx.update("update accounts set balance = balance + :amt where id = :id", credit);
+    return null;
+});
 ```
 
-| Option | Default |
-|---|---|
-| `isolation` | database default (Postgres: READ COMMITTED) |
-| `readOnly` | false |
-| `timeout` | `tx.defaultTimeout` (60s) |
-| `statementTimeout` | `session.statementTimeout` (30s) |
-| `maxAttempts` | 1 (no retry) |
+| Option | Default | Notes |
+|---|---|---|
+| `isolation` | database default (Postgres: READ COMMITTED) | `READ_COMMITTED`, `REPEATABLE_READ`, `SERIALIZABLE` |
+| `readOnly` | false | Writes fail with `QueryFailure` (Postgres SQLState `25006`) |
+| `timeout` | `tx.defaultTimeout` (60s) | Deadline for the whole transaction |
+| `statementTimeout` | `session.statementTimeout` (30s) | Applied with `set local statement_timeout` when set |
+| `maxAttempts` | 1 (no retry) | 1 to 10 |
+
+**Lifecycle.** Borrow a connection, `setAutoCommit(false)`, apply isolation, read-only and the
+statement timeout, run the callback, commit. Any exception rolls back and is rethrown unchanged.
+Hikari restores auto-commit, isolation, read-only and the network timeout when the connection
+returns to the pool; `set local` ends with the transaction.
 
 **Deadline.** When a transaction starts, the engine records its deadline. Before each statement it
-sets `setQueryTimeout(min(remaining time, statementTimeout))`. If the time is already used up, it
-rolls back and throws `TransactionTimeout`.
+sets the JDBC query timeout to `min(time left, statementTimeout)`, rounded up to whole seconds
+(JDBC's unit). A statement cancelled after the deadline passed becomes `TransactionTimeout`; a
+statement started after it fails immediately without reaching the database. The deadline is checked
+again before commit, so a callback that overran rolls back.
 
 **Network timeout.** The connection-level `socketTimeout` follows the global statement timeout. When a
 transaction raises `statementTimeout` (through `TxOptions` or `@Timeouts`), the engine also raises the
@@ -296,8 +307,14 @@ Otherwise the socket backstop would cut long statements short. Hikari restores t
 connection returns to the pool.
 
 **Retry.** Retry is opt-in (`maxAttempts > 1`), because the callback may have side effects. On a
-`TransientFailure` the engine rolls back, waits with exponential backoff and jitter, and reruns the
-whole callback in a new transaction. Single statements are never retried on their own.
+`TransientFailure`, including a serialization failure raised at commit, the engine rolls back, waits,
+and reruns the whole callback in a new transaction with a fresh deadline. The wait before retry `n`
+is random between 0 and `min(2s, 50ms × 2^(n-1))` (full jitter). Single statements are never retried
+on their own; other exceptions are never retried.
+
+**Escaped transactions.** A `Transaction` used after its callback returns throws
+`IllegalStateException`. Calling `db.inTransaction` inside a callback opens a separate transaction on
+another connection.
 
 **Commit outcome.** If the connection is lost while the commit is in flight, the engine throws
 `CommitOutcomeUnknown` and never retries, because the commit may have succeeded.
@@ -434,18 +451,35 @@ in a fresh transaction. Users don't configure the ordering.
 
 - **Packages:** each package has one job. `module-info.java` exports only the public ones.
 
-| Package | Contents | Exported |
-|---|---|---|
-| `io.github.varnitta.plugkit.db` | `DatabaseType`, `Database`, `Databases`, `Transaction`, `RowMapper` | yes |
-| `...db.config` | `DatabaseConfig`, `PoolConfig`, `SessionConfig`, `TxConfig` | yes |
-| `...db.exception` | `InvalidConfigException`, `DatabaseException` hierarchy | yes |
-| `...db.internal` | Engine, Hikari factory, validation helpers | no |
-| `...db.dialect` | `Dialect` interface, registry | no |
-| `...db.dialect.<name>` | One dialect per database | no |
-| `...db.spring` | Auto-configuration, properties, annotations | yes (annotations only) |
+The public API is grouped by feature; everything under `internal` is implementation and isn't
+exported, so applications can't depend on it. The same pattern is used by OkHttp
+(`okhttp3.internal.*`) and JDBI (`core.internal`). Tests mirror the main packages.
 
-- **Boundaries:** only `spring` imports Spring; only `dialect.<name>` contains database-specific
-  code. A test enforces this, so the artifact can be split later by moving packages.
+```
+io.github.varnitta.plugkit.db
+├── Database, Databases, DatabaseType, Health    entry points
+├── config/        DatabaseConfig, PoolConfig, SessionConfig, TxConfig
+├── sql/           SqlOperations, Params, Row, RowMapper
+├── tx/            Transaction, TxOptions, Isolation
+├── exception/     DatabaseException hierarchy, InvalidConfigException
+├── spring/        auto-configuration, properties, annotations (planned)
+└── internal/      not exported
+    ├── pool/          PooledDatabase, HikariPoolFactory, DriverCheck
+    ├── statement/     StatementExecutor, NamedSql, ResultSetRow, UncheckedSqlException
+    ├── tx/            TransactionRunner, ConnectionTransaction, Backoff
+    ├── validation/    ConfigValidator
+    └── dialect/       Dialect, Dialects
+        └── postgres/  PostgresDialect
+```
+
+- **Exceptions stay in one package.** Applications catch them everywhere, so one import location
+  keeps that simple.
+- **Internal visibility:** classes used across `internal` subpackages are `public`; `module-info`
+  still hides them.
+- **`UncheckedSqlException`** carries a `SQLException` out of a `RowMapper`, which can't throw checked
+  exceptions. The engine always catches and translates it, so it never reaches applications.
+- **Boundaries:** only `spring` imports Spring; only `internal.dialect.<name>` contains
+  database-specific code. A test enforces this, so the artifact can be split later by moving packages.
 - **Types:** classes are `final` unless they are an extension point. The module is `@NullMarked`
   (JSpecify) in `module-info.java`, which covers every package; there are no `package-info.java` files.
 - **Config records:** record components are non-null (except `user` and `password`); the compact

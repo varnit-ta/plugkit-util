@@ -24,4 +24,6 @@ module io.github.varnitta.plugkit.db {
     exports io.github.varnitta.plugkit.db;
     exports io.github.varnitta.plugkit.db.config;
     exports io.github.varnitta.plugkit.db.exception;
+    exports io.github.varnitta.plugkit.db.sql;
+    exports io.github.varnitta.plugkit.db.tx;
 }

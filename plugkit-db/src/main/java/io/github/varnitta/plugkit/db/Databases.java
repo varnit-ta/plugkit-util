@@ -1,7 +1,7 @@
 package io.github.varnitta.plugkit.db;
 
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
-import io.github.varnitta.plugkit.db.internal.PooledDatabase;
+import io.github.varnitta.plugkit.db.internal.pool.PooledDatabase;
 
 /**
  * Entry point for creating {@link Database} instances.

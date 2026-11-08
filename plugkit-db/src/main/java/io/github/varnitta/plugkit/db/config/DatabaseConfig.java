@@ -5,7 +5,7 @@ import static java.util.Objects.requireNonNullElse;
 
 import io.github.varnitta.plugkit.db.DatabaseType;
 import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
-import io.github.varnitta.plugkit.db.internal.ConfigValidator;
+import io.github.varnitta.plugkit.db.internal.validation.ConfigValidator;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
