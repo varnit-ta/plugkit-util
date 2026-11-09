@@ -5,7 +5,8 @@ Plug-and-play infrastructure libraries for Java.
 Give plugkit-util your connection details, then use databases, Kafka, caches and resilience patterns
 through simple methods or annotations, with safe defaults and production-grade behaviour built in.
 
-> **Status:** early planning. Nothing is released yet.
+> **Status:** in development. Database and Core are built; Kafka and Cache are not started.
+> Nothing is released yet.
 
 ## Why
 
@@ -16,11 +17,12 @@ re-inventing them.
 
 ## Libraries
 
-Each library is an independent module: use one, some or all of them.
+Each library is an independent module: use one, some or all of them. Core is included
+automatically by the others.
 
 | Library | Covers |
 |---|---|
-| **Database** | Generic database interaction behind interfaces. Postgres first; other databases later |
+| **Database** | Relational databases over JDBC behind one API. PostgreSQL first; other databases later |
 | **Kafka** | Kafka interaction (producing, consuming, transactions). Works with anything that speaks the Kafka protocol |
 | **Cache** | Generic caching. Redis and in-memory first; others such as Memcached later |
 | **Core** | Shared building blocks every library uses: configuration validation, retries, graceful shutdown, health and a common exception base. Resilience patterns (timeouts, retries, circuit breakers, bulkheads) live here |
