@@ -1,0 +1,3 @@
+io.github.varnitta.plugkit.db.internal.spring.PlugkitDbAutoConfiguration
+io.github.varnitta.plugkit.db.internal.spring.PlugkitDbDataSourceAutoConfiguration
+io.github.varnitta.plugkit.db.internal.spring.PlugkitDbSupportAutoConfiguration
