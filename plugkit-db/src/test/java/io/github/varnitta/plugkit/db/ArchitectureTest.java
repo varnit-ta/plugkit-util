@@ -53,6 +53,14 @@ class ArchitectureTest {
     }
 
     @Test
+    void onlyTheMySqlDialectCouldUseTheMySqlDriver() {
+        noClasses().that().resideOutsideOfPackage(DB + ".internal.dialect.mysql..")
+                .should().dependOnClassesThat().resideInAPackage("com.mysql..")
+                .because("database-specific code belongs in its dialect")
+                .check(MAIN);
+    }
+
+    @Test
     void onlyPoolAndMetricsCodeUseHikari() {
         noClasses().that().resideOutsideOfPackages(DB + ".internal.pool..", DB + ".internal.metrics..")
                 .should().dependOnClassesThat().resideInAPackage("com.zaxxer.hikari..")

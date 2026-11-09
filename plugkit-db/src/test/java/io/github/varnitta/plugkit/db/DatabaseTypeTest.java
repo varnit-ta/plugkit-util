@@ -22,11 +22,21 @@ class DatabaseTypeTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
+            "jdbc:mysql://localhost:3306/app",
+            "jdbc:MySQL://localhost/app",
+            "jdbc:aws-wrapper:mysql://cluster.rds.amazonaws.com:3306/app",
+            "jdbc:mysql:replication://primary,replica/app"
+    })
+    void detectsMySql(String url) {
+        assertThat(DatabaseType.fromUrl(url)).contains(DatabaseType.MYSQL);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
             "",
             "postgresql://localhost/app",
-            "jdbc:mysql://localhost:3306/app",
             "jdbc:sqlserver://localhost;databaseName=app",
-            "jdbc:mysql://localhost/postgresql"
+            "jdbc:sqlserver://localhost;databaseName=postgresql"
     })
     void rejectsOtherUrls(String url) {
         assertThat(DatabaseType.fromUrl(url)).isEmpty();

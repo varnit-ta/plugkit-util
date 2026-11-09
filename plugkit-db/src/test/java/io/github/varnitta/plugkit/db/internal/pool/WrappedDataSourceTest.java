@@ -28,12 +28,12 @@ class WrappedDataSourceTest {
 
     @Test
     void dataSourceForAnUnsupportedDatabaseIsRejected() {
-        DataSource mysql = dataSource(false, () -> connectionTo("jdbc:mysql://localhost:3306/app"));
+        DataSource sqlServer = dataSource(false, () -> connectionTo("jdbc:sqlserver://localhost;databaseName=app"));
 
-        assertThatThrownBy(() -> Databases.create(mysql))
+        assertThatThrownBy(() -> Databases.create(sqlServer))
                 .isInstanceOf(InvalidConfigException.class)
                 .hasMessageContaining("The application's DataSource connects to a database plugkit-db doesn't support")
-                .hasMessageContaining("supported: postgres (jdbc:postgresql:)");
+                .hasMessageContaining("supported: postgres (jdbc:postgresql:), mysql (jdbc:mysql:)");
     }
 
     @FunctionalInterface

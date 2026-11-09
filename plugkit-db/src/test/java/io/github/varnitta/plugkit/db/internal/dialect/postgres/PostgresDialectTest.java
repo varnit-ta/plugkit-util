@@ -19,6 +19,8 @@ import io.github.varnitta.plugkit.db.exception.SerializationFailure;
 import io.github.varnitta.plugkit.db.exception.StatementTimeout;
 import io.github.varnitta.plugkit.db.exception.TransactionTimeout;
 import io.github.varnitta.plugkit.db.exception.UniqueViolation;
+import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
+import io.github.varnitta.plugkit.db.internal.dialect.DialectContractTest;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialects;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -32,9 +34,14 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.postgresql.util.PSQLException;
 import org.postgresql.util.ServerErrorMessage;
 
-class PostgresDialectTest {
+class PostgresDialectTest extends DialectContractTest {
 
     private final PostgresDialect dialect = new PostgresDialect();
+
+    @Override
+    protected Dialect dialect() {
+        return dialect;
+    }
 
     @Test
     void isRegisteredForPostgres() {
@@ -43,8 +50,10 @@ class PostgresDialectTest {
         assertThat(dialect.driverClassName()).isEqualTo("org.postgresql.Driver");
         assertThat(dialect.driverArtifact()).isEqualTo("org.postgresql:postgresql");
         assertThat(dialect.maxConnectionsQuery()).isEqualTo("show max_connections");
-        assertThat(dialect.localStatementTimeoutSql(Duration.ofMinutes(5)))
-                .isEqualTo("set local statement_timeout = 300000");
+        assertThat(dialect.statementTimeoutOverrideSql(Duration.ofMinutes(5)))
+                .containsExactly("set local statement_timeout = 300000");
+        assertThat(dialect.statementTimeoutRestoreSql(SessionConfig.defaults())).isEmpty();
+        assertThat(dialect.unsupportedSettings(SessionConfig.defaults())).isEmpty();
     }
 
     static Stream<Arguments> sqlStates() {

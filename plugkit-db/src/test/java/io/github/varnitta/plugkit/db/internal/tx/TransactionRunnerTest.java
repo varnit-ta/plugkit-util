@@ -129,7 +129,7 @@ class TransactionRunnerTest {
             }
         };
         return new TransactionRunner(provider, new PostgresDialect(), CONFIG,
-                new StatementExecutor("unit", Duration.ofSeconds(1)), MetricsRecorder.none());
+                new StatementExecutor("unit", Duration.ofSeconds(1), new PostgresDialect().sqlSyntax()), MetricsRecorder.none());
     }
 
     private Connection fakeConnection() {

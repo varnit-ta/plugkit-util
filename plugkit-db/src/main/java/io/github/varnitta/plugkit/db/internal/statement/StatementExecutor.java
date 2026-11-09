@@ -34,15 +34,17 @@ public final class StatementExecutor {
 
     private final String poolName;
     private final Duration slowQueryThreshold;
+    private final SqlSyntax syntax;
 
-    public StatementExecutor(String poolName, Duration slowQueryThreshold) {
+    public StatementExecutor(String poolName, Duration slowQueryThreshold, SqlSyntax syntax) {
         this.poolName = poolName;
         this.slowQueryThreshold = slowQueryThreshold;
+        this.syntax = syntax;
     }
 
     public <T> List<T> query(Connection connection, String sql, Params params, RowMapper<T> mapper, int maxRows,
                       int queryTimeoutSeconds) throws SQLException {
-        BoundSql bound = NamedSql.parse(sql).bind(params);
+        BoundSql bound = NamedSql.parse(sql, syntax).bind(params);
         long start = System.nanoTime();
         try (PreparedStatement statement = connection.prepareStatement(bound.sql())) {
             statement.setMaxRows(maxRows);
@@ -72,7 +74,7 @@ public final class StatementExecutor {
     }
 
     public int update(Connection connection, String sql, Params params, int queryTimeoutSeconds) throws SQLException {
-        BoundSql bound = NamedSql.parse(sql).bind(params);
+        BoundSql bound = NamedSql.parse(sql, syntax).bind(params);
         long start = System.nanoTime();
         try (PreparedStatement statement = connection.prepareStatement(bound.sql())) {
             statement.setQueryTimeout(queryTimeoutSeconds);
@@ -88,7 +90,7 @@ public final class StatementExecutor {
         if (rows.isEmpty()) {
             return new int[0];
         }
-        NamedSql parsed = NamedSql.parse(sql);
+        NamedSql parsed = NamedSql.parse(sql, syntax);
         List<BoundSql> bound = rows.stream().map(parsed::bind).toList();
         String expandedSql = bound.getFirst().sql();
         if (bound.stream().anyMatch(row -> !row.sql().equals(expandedSql))) {
