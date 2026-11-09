@@ -22,7 +22,7 @@ automatically by the others.
 
 | Library | Covers |
 |---|---|
-| **Database** | Relational databases over JDBC behind one API. PostgreSQL first; other databases later |
+| **Database** | Relational databases over JDBC behind one API. PostgreSQL and MySQL; other databases later |
 | **Kafka** | Kafka interaction (producing, consuming, transactions). Works with anything that speaks the Kafka protocol |
 | **Cache** | Generic caching. Redis and in-memory first; others such as Memcached later |
 | **Core** | Shared building blocks every library uses: configuration validation, retries, graceful shutdown, health and a common exception base. Resilience patterns (timeouts, retries, circuit breakers, bulkheads) live here |

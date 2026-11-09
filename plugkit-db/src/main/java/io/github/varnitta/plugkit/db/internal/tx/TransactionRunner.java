@@ -15,6 +15,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.List;
 import java.util.function.Function;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
@@ -30,6 +31,10 @@ import org.jspecify.annotations.Nullable;
  * <p>When the {@link ConnectionProvider} returns a connection whose transaction is managed elsewhere,
  * for example by Spring's {@code @Transactional}, the callback joins that transaction: no begin, commit,
  * rollback or retry, and isolation and read-only settings are left to the outer transaction.
+ *
+ * <p>A statement timeout that differs from the session's is applied with the dialect's override
+ * statements and undone with its restore statements when the transaction ends, so a pooled connection
+ * never keeps a changed limit.
  */
 @Slf4j
 public final class TransactionRunner {
@@ -99,6 +104,7 @@ public final class TransactionRunner {
 
     private <T> T runOwn(Connection connection, ConnectionTransaction transaction, TxOptions options,
                          Duration statementTimeout, Function<Transaction, T> work) throws SQLException {
+        boolean overridden = false;
         try {
             connection.setAutoCommit(false);
             if (options.isolation() != null) {
@@ -107,7 +113,7 @@ public final class TransactionRunner {
             if (options.readOnly()) {
                 connection.setReadOnly(true);
             }
-            applyStatementTimeout(connection, statementTimeout);
+            overridden = overrideStatementTimeout(connection, statementTimeout);
             T result = work.apply(transaction);
             transaction.deactivate();
             if (transaction.deadlinePassed()) {
@@ -120,29 +126,52 @@ public final class TransactionRunner {
             throw e;
         } finally {
             transaction.deactivate();
+            if (overridden) {
+                restoreStatementTimeout(connection);
+            }
         }
     }
 
     private <T> T runJoined(Connection connection, ConnectionTransaction transaction, Duration statementTimeout,
                             Function<Transaction, T> work) throws SQLException {
+        boolean overridden = false;
         try {
-            applyStatementTimeout(connection, statementTimeout);
+            overridden = overrideStatementTimeout(connection, statementTimeout);
             return work.apply(transaction);
         } finally {
             transaction.deactivate();
+            if (overridden) {
+                restoreStatementTimeout(connection);
+            }
         }
     }
 
-    private void applyStatementTimeout(Connection connection, Duration statementTimeout) throws SQLException {
+    private boolean overrideStatementTimeout(Connection connection, Duration statementTimeout) throws SQLException {
         Duration sessionTimeout = config.session().statementTimeout();
-        if (!statementTimeout.equals(sessionTimeout)) {
-            try (Statement statement = connection.createStatement()) {
-                statement.execute(dialect.localStatementTimeoutSql(statementTimeout));
-            }
+        boolean overridden = !statementTimeout.equals(sessionTimeout);
+        if (overridden) {
+            execute(connection, dialect.statementTimeoutOverrideSql(statementTimeout));
         }
         if (statementTimeout.compareTo(sessionTimeout) > 0) {
             connection.setNetworkTimeout(Runnable::run,
                     Math.toIntExact(statementTimeout.plus(NETWORK_TIMEOUT_MARGIN).toMillis()));
+        }
+        return overridden;
+    }
+
+    private void restoreStatementTimeout(Connection connection) {
+        try {
+            execute(connection, dialect.statementTimeoutRestoreSql(config.session()));
+        } catch (SQLException e) {
+            log.warn("Could not restore the statement timeout on a connection of pool '{}'", config.poolName(), e);
+        }
+    }
+
+    private static void execute(Connection connection, List<String> sqlStatements) throws SQLException {
+        for (String sql : sqlStatements) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
         }
     }
 

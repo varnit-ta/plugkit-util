@@ -7,6 +7,7 @@ How different databases plug in through dialect adapters, and how their errors l
 
 1. [Dialect adapters and a factory for multiple databases](#1-dialect-adapters-and-a-factory-for-multiple-databases)
 2. [Vendor-neutral error model](#2-vendor-neutral-error-model)
+3. [MySQL dialect](#3-mysql-dialect)
 
 ## 1. Dialect adapters and a factory for multiple databases
 
@@ -57,6 +58,7 @@ classDiagram
     class DatabaseType {
         <<enum>>
         POSTGRES
+        MYSQL
         +jdbcPrefix() String
         +configName() String
         +fromUrl(url)$ Optional~DatabaseType~
@@ -68,7 +70,10 @@ classDiagram
         +driverArtifact() String
         +connectionProperties(session, userProperties) Map
         +maxConnectionsQuery() String
-        +localStatementTimeoutSql(statementTimeout) String
+        +statementTimeoutOverrideSql(timeout) List~String~
+        +statementTimeoutRestoreSql(session) List~String~
+        +sqlSyntax() SqlSyntax
+        +unsupportedSettings(session) List~String~
         +translate(SQLException, poolName) DatabaseException
     }
     class Dialects {
@@ -78,11 +83,11 @@ classDiagram
     class PostgresDialect {
         <<adapter>>
     }
-    class FutureDialect["MySqlDialect (future)"] {
+    class MySqlDialect {
         <<adapter>>
     }
     Dialect <|.. PostgresDialect
-    Dialect <|.. FutureDialect
+    Dialect <|.. MySqlDialect
     Dialects ..> Dialect : returns
     Dialects ..> DatabaseType : switch over
     Dialect ..> DatabaseType
@@ -95,8 +100,9 @@ classDiagram
     DriverCheck ..> Dialect : driverClassName, driverArtifact
     HikariPoolFactory ..> Dialect : connectionProperties, translate
     PooledDatabase ..> Dialects : forType
-    PooledDatabase ..> Dialect : maxConnectionsQuery, translate
-    TransactionRunner ..> Dialect : localStatementTimeoutSql, translate
+    PooledDatabase ..> Dialect : maxConnectionsQuery, unsupportedSettings, sqlSyntax, translate
+    TransactionRunner ..> Dialect : statementTimeoutOverrideSql, statementTimeoutRestoreSql, translate
+    StatementExecutor ..> SqlSyntax : passes to NamedSql
     ConnectionTransaction ..> Dialect : translate
 ```
 
@@ -108,7 +114,10 @@ classDiagram
 | `driverClassName()` / `driverArtifact()` | Which driver must be present, and which dependency provides it? | `DriverCheck` | Startup |
 | `connectionProperties(session, user)` | Which driver properties apply the session timeouts, derived timeouts and safe defaults, merged with the user's? Which user keys are forbidden? | `HikariPoolFactory` | Startup |
 | `maxConnectionsQuery()` | How is the server's connection limit read? | `PooledDatabase` | Startup check |
-| `localStatementTimeoutSql(timeout)` | How is a statement timeout set for the current transaction only? | `TransactionRunner` | Transaction begin, when the statement timeout differs from the session's |
+| `statementTimeoutOverrideSql(timeout)` | How is a different statement timeout set for one transaction? | `TransactionRunner` | Transaction begin, when the statement timeout differs from the session's |
+| `statementTimeoutRestoreSql(session)` | How is that override undone? Empty when the override already ends with the transaction | `TransactionRunner` | Transaction end, after commit or rollback |
+| `sqlSyntax()` | Which characters quote text, and which comment styles exist, so `:name` inside them isn't a parameter? | `StatementExecutor` → `NamedSql` | Every statement |
+| `unsupportedSettings(session)` | Which configured settings can this database not enforce? | `PooledDatabase` (logged as warnings) | Startup |
 | `translate(e, pool)` | Which `DatabaseException` does this vendor error mean? | Every statement path, pool start, health | On error |
 
 #### Selecting a dialect
@@ -132,7 +141,7 @@ sequenceDiagram
 - Wrapper prefixes are skipped: `jdbc:aws-wrapper:postgresql:` and `jdbc:otel:postgresql:` both resolve
   to `postgres`.
 - If `databaseType` is set it must match the URL: `databaseType is 'postgres' but url does not start with jdbc:postgresql:`.
-- An unsupported URL fails: `url is not for a supported database; supported: postgres (jdbc:postgresql:)`.
+- An unsupported URL fails: `url is not for a supported database; supported: postgres (jdbc:postgresql:), mysql (jdbc:mysql:)`.
 - A wrapped `DataSource` is detected from its connection metadata URL the same way.
 
 #### The PostgreSQL adapter
@@ -152,52 +161,24 @@ Connection properties produced by `PostgresDialect.connectionProperties`:
 - `translate` maps SQLState codes to exception types ([part 2](#2-vendor-neutral-error-model)). Messages use
   the server's primary error text, never `DETAIL`. For pgjdbc's `BatchUpdateException`, whose message
   contains the SQL with bound values, it reads the underlying server error instead.
-- `localStatementTimeoutSql` returns `set local statement_timeout = <ms>`.
+- The statement-timeout override is `set local statement_timeout = <ms>`, which ends with the
+  transaction, so there are no restore statements.
+- `sqlSyntax`: `'…'` and `"…"` quote text, `--` and `/* */` are comments, and `$$ … $$` / `$tag$ … $tag$`
+  quote text.
+- Nothing is unsupported: every session setting is enforced by the server.
 
 #### Adding a database
 
 1. Add a constant to `DatabaseType` with the URL sub-protocol, for example `MYSQL("mysql")`.
-2. Create `internal/dialect/mysql/MySqlDialect implements Dialect`. The build fails until step 3.
-3. Add `case MYSQL -> MYSQL_DIALECT;` to `Dialects.forType`.
+2. Create `internal/dialect/<name>/<Name>Dialect implements Dialect`. The build fails until step 3.
+3. Add the `case` to `Dialects.forType`.
 4. Add the driver as an optional dependency only if the dialect needs driver classes.
-5. Add `MySqlDialectTest` (error mapping, connection properties) and Testcontainers integration tests.
-6. Introduce the shared `DialectContractTest` and a way for a dialect to report session settings it
-   can't enforce; both are deferred until this second dialect exists (see Consequences).
+5. Add `<Name>DialectTest extends DialectContractTest` (the shared rules every dialect must pass) plus the
+   database's own error mapping and connection properties, and Testcontainers integration tests.
+6. Add an `ArchitectureTest` rule keeping the driver's classes inside the dialect's package, and a part
+   to this ADR describing the dialect.
 
-An illustrative skeleton (not part of the code base):
-
-```java
-public final class MySqlDialect implements Dialect {
-
-    public DatabaseType databaseType() { return DatabaseType.MYSQL; }
-
-    public String driverClassName() { return "com.mysql.cj.jdbc.Driver"; }
-
-    public String driverArtifact() { return "com.mysql:mysql-connector-j"; }
-
-    public Map<String, String> connectionProperties(SessionConfig session, Map<String, String> user) {
-        return Map.of(
-                "connectTimeout", "5000",
-                "socketTimeout", String.valueOf(session.statementTimeout().plusSeconds(5).toMillis()),
-                "sessionVariables", "max_execution_time=" + session.statementTimeout().toMillis()
-                        + ",innodb_lock_wait_timeout=" + Math.max(1, session.lockTimeout().toSeconds()));
-    }
-
-    public String maxConnectionsQuery() { return "select @@max_connections"; }
-
-    public String localStatementTimeoutSql(Duration timeout) {
-        return "set session max_execution_time = " + timeout.toMillis();
-    }
-
-    public DatabaseException translate(SQLException e, String poolName) {
-        return switch (e.getErrorCode()) {
-            case 1062 -> new UniqueViolation(message(e, poolName), null, e.getSQLState(), e);
-            case 1213 -> new Deadlock(message(e, poolName), e.getSQLState(), e);
-            default -> new QueryFailure(message(e, poolName), e.getSQLState(), e);
-        };
-    }
-}
-```
+MySQL was added this way ([part 3](#3-mysql-dialect)).
 
 Nothing outside `internal.dialect` changes: the engine, the public API, the Spring integration and
 application code stay the same. Users switch databases by changing the driver dependency and the URL.
@@ -206,10 +187,9 @@ application code stay the same. Users switch databases by changing the driver de
 
 - One API for every database; vendor differences are contained in one class per database.
 - The exhaustive `switch` turns "forgot to register the dialect" into a compile error.
-- Settings a database can't enforce (for example MySQL has no idle-in-transaction timeout) need a way
-  to be reported as startup warnings; this is added with the second dialect, together with a
-  `DialectContractTest` every dialect must pass. Until then, with only PostgreSQL, there is nothing to
-  compare against.
+- Settings a database can't enforce are reported as startup warnings through `unsupportedSettings`,
+  instead of being silently ignored.
+- `DialectContractTest` holds the rules every dialect must pass; each dialect's test extends it.
 - Statement timeouts and lock timeouts have different units and semantics per database; each adapter
   documents how it maps them.
 
@@ -323,3 +303,79 @@ Connection lost during commit; the transaction may or may not have been applied 
 - Retry decisions come from the type, not from string matching.
 - `constraintName()` is filled when the driver reports it (PostgreSQL via `ServerErrorMessage`).
 - Adding a database means adding its mapping table; the hierarchy stays the same.
+
+## 3. MySQL dialect
+
+### Context
+
+MySQL is the second supported database. It differs from PostgreSQL in ways the engine must not see:
+error codes instead of SQLStates, session variables instead of login options, no transaction-scoped
+settings, backtick identifiers, backslash escapes and `#` comments, and some timeouts it can't enforce
+at all. Its duplicate-key error message also contains the duplicate value.
+
+### Decision
+
+- **`MySqlDialect` uses only standard JDBC types.** It reads `SQLException.getErrorCode()` and the
+  message text, so it needs no MySQL driver classes and adds no compile-time dependency. The driver,
+  `com.mysql:mysql-connector-j`, is added by the application.
+- **Session timeouts travel in Connector/J's `sessionVariables`**: `max_execution_time` (statement
+  timeout) and `innodb_lock_wait_timeout` (lock timeout, whole seconds).
+- **The statement-timeout override is undone after the transaction.** MySQL has no `set local`, so the
+  override is `set session max_execution_time` and the restore statement sets it back to the session
+  default. Without the restore, the changed limit would stay on the pooled connection for the next user.
+- **Duplicate-key messages are rebuilt.** The server's text, `Duplicate entry 'alice@example.com' for key
+  'users.email'`, contains the value; the translated message keeps only the key name.
+- **What MySQL can't enforce is reported at startup**, not silently ignored.
+
+### Structure
+
+Connection properties produced by `MySqlDialect.connectionProperties`:
+
+| Property | Value | Source |
+|---|---|---|
+| `connectTimeout` | `5000` (milliseconds) | managed; a user value is rejected |
+| `socketTimeout` | `session.statementTimeout` + 5s, in milliseconds | managed; a user value is rejected |
+| `sessionVariables` | `max_execution_time=<ms>,innodb_lock_wait_timeout=<s>` | managed; a user `sessionVariables` value is appended after it |
+
+| Concern | MySQL behaviour |
+|---|---|
+| Statement-timeout override | `set session max_execution_time = <ms>`, restored to the session value after commit or rollback (also after a joined Spring transaction's callback) |
+| `sqlSyntax` | `'…'`, `"…"` and `` `…` `` quote text or identifiers; `\'` is an escaped quote; `#` and `-- ` (with a space) start comments; no dollar quoting |
+| `maxConnectionsQuery` | `select @@max_connections` |
+| Messages | server text plus `[pool=…, SQLState=…, errorCode=…]`; duplicate keys rebuilt without the value |
+
+Startup warnings from `unsupportedSettings`:
+
+| Setting | Why it's reported |
+|---|---|
+| `session.statementTimeout` | `max_execution_time` applies to SELECT statements only; other statements are stopped by the driver's socket timeout (statement timeout + 5s) and fail with `ConnectionLost` |
+| `session.idleInTransactionTimeout` | MySQL has no equivalent setting |
+| `session.lockTimeout` (only when not whole seconds) | `innodb_lock_wait_timeout` is in whole seconds, so the value is rounded up |
+
+Error mapping:
+
+| Exception | MySQL error code | Retryable |
+|---|---|---|
+| `UniqueViolation` | `1062`, `1586`; key name read from the message | no |
+| `ForeignKeyViolation` | `1216`, `1217`, `1451`, `1452`; constraint name read from the message | no |
+| `NotNullViolation` | `1048`, `1364` | no |
+| `CheckViolation` | `3819`; constraint name read from the message | no |
+| `Deadlock` | `1213` | yes |
+| `LockTimeout` | `1205` | no |
+| `StatementTimeout` | `3024` (`max_execution_time`), `1317` / SQLState `70100` / `SQLTimeoutException` (client cancel) | no |
+| `ConnectionLost` | `1040`, `1053`, any SQLState `08xxx` | yes |
+| `QueryFailure` | everything else | no |
+
+For a batch failure, the error is read from the `BatchUpdateException`'s next exception or cause.
+
+### Consequences
+
+- Application code, configuration keys and exception types are the same on MySQL and PostgreSQL; only
+  the URL and the driver dependency change.
+- Long-running non-SELECT statements on MySQL end with `ConnectionLost` from the socket timeout rather
+  than `StatementTimeout`; the startup warning says so.
+- Constraint and key names depend on MySQL's message wording; if the wording changes, the name is
+  missing but the exception type is still correct.
+- `MySqlDatabaseIT` verifies session variables, CRUD, unique-key translation without the value, quoting,
+  lock wait timeout, deadlock retry, override restore and health against MySQL 8.4.
+

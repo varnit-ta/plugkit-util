@@ -81,7 +81,7 @@ public final class PooledDatabase implements Database {
         this.metrics = metrics;
         this.connections = new TranslatingConnectionProvider(providers.apply(dataSource), config.poolName(), hikari,
                 config.pool().acquireTimeout());
-        this.executor = new StatementExecutor(config.poolName(), config.slowQueryThreshold());
+        this.executor = new StatementExecutor(config.poolName(), config.slowQueryThreshold(), dialect.sqlSyntax());
         this.transactions = new TransactionRunner(connections, dialect, config, executor, metrics);
         this.inFlight = new InFlightTracker("Database pool '" + config.poolName() + "'");
     }
@@ -94,6 +94,8 @@ public final class PooledDatabase implements Database {
         HikariDataSource pool = HikariPoolFactory.start(config, dialect, recorder);
         PooledDatabase database = new PooledDatabase(config, dialect, pool, true, providers, recorder);
         database.warnIfPoolIsLarge();
+        dialect.unsupportedSettings(config.session()).forEach(problem ->
+                log.warn("Database pool '{}': {}", config.poolName(), problem));
         log.info("Started database pool '{}' ({}, maxSize={})", config.poolName(), config.databaseType().configName(),
                 config.pool().maxSize());
         return database;

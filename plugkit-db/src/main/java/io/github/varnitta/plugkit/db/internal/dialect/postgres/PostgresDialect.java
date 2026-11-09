@@ -15,6 +15,7 @@ import io.github.varnitta.plugkit.db.exception.StatementTimeout;
 import io.github.varnitta.plugkit.db.exception.TransactionTimeout;
 import io.github.varnitta.plugkit.db.exception.UniqueViolation;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
+import io.github.varnitta.plugkit.db.internal.statement.SqlSyntax;
 import io.github.varnitta.plugkit.core.internal.validation.ConfigValidator;
 import java.sql.BatchUpdateException;
 import java.sql.SQLException;
@@ -23,6 +24,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.postgresql.util.PSQLException;
 import org.postgresql.util.ServerErrorMessage;
@@ -30,7 +32,8 @@ import org.postgresql.util.ServerErrorMessage;
 /**
  * PostgreSQL dialect.
  *
- * <p>Sends session timeouts through the driver's {@code options} property, derives
+ * <p>Sends session timeouts through the driver's {@code options} property, overrides the statement
+ * timeout per transaction with {@code set local} (which ends with the transaction), derives
  * {@code socketTimeout} from the statement timeout, disables server error detail in driver messages and
  * maps SQLState codes to {@link io.github.varnitta.plugkit.db.exception.DatabaseException} types.
  * Messages use the server's primary error text, never its {@code DETAIL}, so row values don't leak.
@@ -38,6 +41,7 @@ import org.postgresql.util.ServerErrorMessage;
 public final class PostgresDialect implements Dialect {
 
     static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    private static final SqlSyntax SYNTAX = new SqlSyntax(Set.of('\'', '"'), false, false, false, true);
     static final Duration SOCKET_TIMEOUT_MARGIN = Duration.ofSeconds(5);
     private static final List<String> DERIVED_PROPERTIES = List.of("connectTimeout", "socketTimeout");
 
@@ -78,8 +82,23 @@ public final class PostgresDialect implements Dialect {
     }
 
     @Override
-    public String localStatementTimeoutSql(Duration statementTimeout) {
-        return "set local statement_timeout = " + statementTimeout.toMillis();
+    public List<String> statementTimeoutOverrideSql(Duration statementTimeout) {
+        return List.of("set local statement_timeout = " + statementTimeout.toMillis());
+    }
+
+    @Override
+    public List<String> statementTimeoutRestoreSql(SessionConfig session) {
+        return List.of();
+    }
+
+    @Override
+    public SqlSyntax sqlSyntax() {
+        return SYNTAX;
+    }
+
+    @Override
+    public List<String> unsupportedSettings(SessionConfig session) {
+        return List.of();
     }
 
     @Override
