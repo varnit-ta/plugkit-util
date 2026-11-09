@@ -3,6 +3,8 @@ package io.github.varnitta.plugkit.db.internal.statement;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.varnitta.plugkit.db.internal.dialect.mysql.MySqlDialect;
+import io.github.varnitta.plugkit.db.internal.dialect.postgres.PostgresDialect;
 import io.github.varnitta.plugkit.db.sql.Params;
 import java.util.Arrays;
 import java.util.List;
@@ -13,9 +15,12 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class NamedSqlTest {
 
+    private static final SqlSyntax POSTGRES = new PostgresDialect().sqlSyntax();
+    private static final SqlSyntax MYSQL = new MySqlDialect().sqlSyntax();
+
     @Test
     void replacesNamedParametersInOrder() {
-        BoundSql bound = NamedSql.parse("select * from t where a = :a and b = :b_2")
+        BoundSql bound = NamedSql.parse("select * from t where a = :a and b = :b_2", POSTGRES)
                 .bind(Params.of("b_2", 2, "a", 1));
 
         assertThat(bound.sql()).isEqualTo("select * from t where a = ? and b = ?");
@@ -24,7 +29,7 @@ class NamedSqlTest {
 
     @Test
     void repeatedNameBindsEachOccurrence() {
-        BoundSql bound = NamedSql.parse("select :x, :x").bind(Params.of("x", "v"));
+        BoundSql bound = NamedSql.parse("select :x, :x", POSTGRES).bind(Params.of("x", "v"));
 
         assertThat(bound.sql()).isEqualTo("select ?, ?");
         assertThat(bound.values()).containsExactly("v", "v");
@@ -32,7 +37,7 @@ class NamedSqlTest {
 
     @Test
     void nullValuesAreBound() {
-        BoundSql bound = NamedSql.parse("update t set a = :a").bind(Params.of("a", null));
+        BoundSql bound = NamedSql.parse("update t set a = :a", POSTGRES).bind(Params.of("a", null));
 
         assertThat(bound.values()).containsExactly((Object) null);
     }
@@ -51,7 +56,7 @@ class NamedSqlTest {
             "select 'it''s :a'"
     })
     void leavesNonParametersUntouched(String sql) {
-        NamedSql parsed = NamedSql.parse(sql);
+        NamedSql parsed = NamedSql.parse(sql, POSTGRES);
 
         assertThat(parsed.parameterNames()).isEmpty();
         assertThat(parsed.bind(Params.empty()).sql()).isEqualTo(sql);
@@ -59,19 +64,19 @@ class NamedSqlTest {
 
     @Test
     void castAfterParameterIsKept() {
-        BoundSql bound = NamedSql.parse("select :id::uuid").bind(Params.of("id", "x"));
+        BoundSql bound = NamedSql.parse("select :id::uuid", POSTGRES).bind(Params.of("id", "x"));
 
         assertThat(bound.sql()).isEqualTo("select ?::uuid");
     }
 
     @Test
     void unterminatedQuoteDoesNotHideLaterText() {
-        assertThat(NamedSql.parse("select 'abc").bind(Params.empty()).sql()).isEqualTo("select 'abc");
+        assertThat(NamedSql.parse("select 'abc", POSTGRES).bind(Params.empty()).sql()).isEqualTo("select 'abc");
     }
 
     @Test
     void collectionsExpandForInLists() {
-        BoundSql bound = NamedSql.parse("select * from t where id in (:ids) and s = :s")
+        BoundSql bound = NamedSql.parse("select * from t where id in (:ids) and s = :s", POSTGRES)
                 .bind(Params.of("ids", List.of(1, 2, 3), "s", "x"));
 
         assertThat(bound.sql()).isEqualTo("select * from t where id in (?, ?, ?) and s = ?");
@@ -80,7 +85,7 @@ class NamedSqlTest {
 
     @Test
     void singleElementCollection() {
-        BoundSql bound = NamedSql.parse("where id in (:ids)").bind(Params.of("ids", Set.of(7)));
+        BoundSql bound = NamedSql.parse("where id in (:ids)", POSTGRES).bind(Params.of("ids", Set.of(7)));
 
         assertThat(bound.sql()).isEqualTo("where id in (?)");
     }
@@ -88,7 +93,7 @@ class NamedSqlTest {
     @Test
     void arraysAreBoundAsSingleValues() {
         Integer[] ids = {1, 2};
-        BoundSql bound = NamedSql.parse("where id = any(:ids)").bind(Params.of("ids", ids));
+        BoundSql bound = NamedSql.parse("where id = any(:ids)", POSTGRES).bind(Params.of("ids", ids));
 
         assertThat(bound.sql()).isEqualTo("where id = any(?)");
         assertThat(bound.values()).hasSize(1);
@@ -97,20 +102,50 @@ class NamedSqlTest {
 
     @Test
     void emptyCollectionIsRejected() {
-        assertThatThrownBy(() -> NamedSql.parse("where id in (:ids)").bind(Params.of("ids", List.of())))
+        assertThatThrownBy(() -> NamedSql.parse("where id in (:ids)", POSTGRES).bind(Params.of("ids", List.of())))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Parameter :ids is an empty collection");
     }
 
     @Test
     void missingParameterIsRejectedWithGivenNames() {
-        assertThatThrownBy(() -> NamedSql.parse("where a = :a and b = :b").bind(Params.of("a", 1, "c", 3)))
+        assertThatThrownBy(() -> NamedSql.parse("where a = :a and b = :b", POSTGRES).bind(Params.of("a", 1, "c", 3)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("No value for parameter :b; given Params[a, c]");
     }
 
     @Test
     void extraParametersAreIgnored() {
-        assertThat(NamedSql.parse("select :a").bind(Params.of("a", 1, "unused", 2)).values()).containsExactly(1);
+        assertThat(NamedSql.parse("select :a", POSTGRES).bind(Params.of("a", 1, "unused", 2)).values()).containsExactly(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "select 1 as `col:a`",
+            "select 'it\\'s :a'",
+            "select 1 # :a\n",
+            "select \"x:a\""
+    })
+    void mySqlQuotingRulesAreFollowed(String sql) {
+        assertThat(NamedSql.parse(sql, MYSQL).parameterNames()).isEmpty();
+    }
+
+    @Test
+    void mySqlParameterAfterBacktickIdentifierIsFound() {
+        BoundSql bound = NamedSql.parse("select `user:id` from t where id = :id", MYSQL).bind(Params.of("id", 1));
+
+        assertThat(bound.sql()).isEqualTo("select `user:id` from t where id = ?");
+    }
+
+    @Test
+    void mySqlDashNeedsSpaceToStartAComment() {
+        assertThat(NamedSql.parse("select 5--:a", MYSQL).parameterNames()).containsExactly("a");
+        assertThat(NamedSql.parse("select 5 -- :a", MYSQL).parameterNames()).isEmpty();
+    }
+
+    @Test
+    void postgresDoesNotTreatHashOrBacktickAsQuoting() {
+        assertThat(NamedSql.parse("select 1 # :a", POSTGRES).parameterNames()).containsExactly("a");
+        assertThat(NamedSql.parse("select $$ :a $$", MYSQL).parameterNames()).containsExactly("a");
     }
 }

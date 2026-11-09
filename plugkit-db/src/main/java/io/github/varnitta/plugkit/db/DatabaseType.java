@@ -13,7 +13,8 @@ import java.util.Optional;
  */
 public enum DatabaseType {
 
-    POSTGRES("postgresql");
+    POSTGRES("postgresql"),
+    MYSQL("mysql");
 
     private final String subProtocol;
 

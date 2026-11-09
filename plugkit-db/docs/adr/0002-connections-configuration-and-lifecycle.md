@@ -203,7 +203,7 @@ flowchart LR
 
 | Key | Default | Applied by |
 |---|---|---|
-| `databaseType` (Spring: `database-type`) | inferred from `url` | Dialect selection |
+| `databaseType` (Spring: `database-type`): `postgres` or `mysql` | inferred from `url` | Dialect selection |
 | `url`, `user`, `password` | — (`url` required) | Driver |
 | `poolName` | `plugkit-db` | Hikari, logs, metrics, error messages |
 | `pool.maxSize` | 10 | Hikari |

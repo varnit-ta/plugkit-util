@@ -3,14 +3,16 @@ package io.github.varnitta.plugkit.db.internal.pool;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import io.github.varnitta.plugkit.db.DatabaseType;
 import io.github.varnitta.plugkit.db.config.SessionConfig;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
-import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
 import io.github.varnitta.plugkit.db.internal.dialect.postgres.PostgresDialect;
+import io.github.varnitta.plugkit.db.internal.statement.SqlSyntax;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -57,8 +59,23 @@ class DriverCheckTest {
         }
 
         @Override
-        public String localStatementTimeoutSql(Duration statementTimeout) {
-            return "";
+        public List<String> statementTimeoutOverrideSql(Duration statementTimeout) {
+            return List.of();
+        }
+
+        @Override
+        public List<String> statementTimeoutRestoreSql(SessionConfig session) {
+            return List.of();
+        }
+
+        @Override
+        public SqlSyntax sqlSyntax() {
+            return new PostgresDialect().sqlSyntax();
+        }
+
+        @Override
+        public List<String> unsupportedSettings(SessionConfig session) {
+            return List.of();
         }
 
         @Override

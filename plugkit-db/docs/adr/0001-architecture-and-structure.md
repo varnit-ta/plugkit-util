@@ -85,6 +85,7 @@ every dialect, Micrometer support and Spring Boot support.
 | JSpecify | compile | Nullness annotations on the public API |
 | Lombok | provided | Compile-time builders and `@Slf4j` loggers; not on the user's classpath |
 | PostgreSQL JDBC driver | optional | Compiled against to read constraint names; touched only when `databaseType` is `postgres` |
+| MySQL Connector/J | test only | `MySqlDialect` uses only standard JDBC types, so the library doesn't compile against it |
 | Micrometer | optional | Used only by `MeteredDatabases` and the Spring integration |
 | `spring-boot-autoconfigure`, `spring-boot-health`, `spring-jdbc` | optional | Auto-configuration activates only when present |
 | JDBC driver for the user's database | not included | The application adds it |
@@ -108,7 +109,7 @@ every dialect, Micrometer support and Spring Boot support.
 | Plain SQL with named parameters | ORM, entity mapping, query generation |
 | Connection pool with safe defaults | Schema migrations (use Flyway or Liquibase) |
 | Timeouts, error translation, transaction retry | Cloud authentication code (vendor drivers handle it) |
-| PostgreSQL first | Other databases until their dialect ships |
+| PostgreSQL and MySQL | Other databases until their dialect ships |
 
 ### Structure
 
@@ -190,14 +191,15 @@ io.github.varnitta.plugkit.db                 exported
 └── internal/                                     not exported
     ├── connection/    ConnectionProvider, DataSourceConnectionProvider
     ├── dialect/       Dialect, Dialects
-    │   └── postgres/  PostgresDialect
+    │   ├── postgres/  PostgresDialect
+    │   └── mysql/     MySqlDialect
     ├── metrics/       MetricsRecorder, MetricsRecorderFactory, NoMetricsRecorder,
     │                  MicrometerMetricsRecorder
     ├── pool/          PooledDatabase, TranslatingConnectionProvider, HikariPoolFactory, DriverCheck
     ├── spring/        auto-configurations, SpringConnectionProvider, interceptors,
     │                  DatabaseHealthIndicator, AnnotationLookup, ProxyCreatorRegistrar
     ├── statement/     StatementExecutor, NamedSql, BoundSql, ResultSetRow, UncheckedSqlException,
-    │                  SqlFunction, SqlSupplier
+    │                  SqlFunction, SqlSupplier, SqlSyntax
     └── tx/            TransactionRunner, ConnectionTransaction, TimeoutOverrides, TimeoutOverride,
                        TimeoutOverrideScope
 
@@ -275,7 +277,7 @@ flowchart TD
 |---|---|
 | Only `spring` and `internal.spring` use Spring | The core works without Spring |
 | Only `metrics`, `internal.metrics` and `internal.spring` use Micrometer | The core works without Micrometer |
-| Only `internal.dialect.postgres` uses the PostgreSQL driver | Database-specific code stays in its dialect |
+| Only `internal.dialect.postgres` uses the PostgreSQL driver, and only `internal.dialect.mysql` could use the MySQL driver | Database-specific code stays in its dialect |
 | Only `internal.pool` and `internal.metrics` use HikariCP | The pool can be replaced |
 | `exception` depends only on itself, core's exceptions, the JDK and JSpecify | Catching an exception pulls in nothing else |
 | `config` depends only on core's validation | Configuration stays independent of the engine |
@@ -351,8 +353,10 @@ flowchart LR
 
 - Behaviour is verified against a real database, real Spring wiring and real faults.
 - `mvn verify` needs Docker; without it, integration tests are skipped rather than failing.
-- A `DialectContractTest` that every dialect must pass is added with the second dialect
+- `DialectContractTest` holds the rules every dialect must pass; `PostgresDialectTest` and
+  `MySqlDialectTest` extend it
   ([ADR-0003 part 1](0003-multi-database-support.md#1-dialect-adapters-and-a-factory-for-multiple-databases)).
+- MySQL integration tests (`MySqlDatabaseIT`) run against a shared MySQL 8.4 container (`TestMySql`).
 - Not covered yet: performance benchmarks against raw JDBC (JMH) and binary-compatibility checks
   (`japicmp`), planned before 1.0.
 

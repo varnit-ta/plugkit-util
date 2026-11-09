@@ -84,8 +84,8 @@ class DatabaseConfigTest {
 
     @Test
     void unsupportedDatabaseIsRejected() {
-        assertThat(configProblemsThrownBy(() -> DatabaseConfig.builder().url("jdbc:mysql://localhost:3306/app").build()))
-                .containsExactly("url is not for a supported database; supported: postgres (jdbc:postgresql:)");
+        assertThat(configProblemsThrownBy(() -> DatabaseConfig.builder().url("jdbc:sqlserver://localhost;databaseName=app").build()))
+                .containsExactly("url is not for a supported database; supported: postgres (jdbc:postgresql:), mysql (jdbc:mysql:)");
     }
 
     @Test

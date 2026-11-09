@@ -106,8 +106,9 @@ flowchart LR
 
 - `Params.of("id", 42).and("status", "OPEN")`. Values may be `null`; names must be identifiers and can't
   repeat.
-- The parser skips string literals, quoted identifiers, `--` and `/* */` comments, dollar-quoted text
-  (`$$ … $$`, `$tag$ … $tag$`) and `::` casts.
+- The parser skips quoted text, quoted identifiers and comments according to the database's `SqlSyntax`
+  (PostgreSQL: `'…'`, `"…"`, `$$ … $$`; MySQL: `'…'` with `\'` escapes, `"…"`, `` `…` ``, `#` comments),
+  plus `/* */` comments and `::` casts ([ADR-0003](0003-multi-database-support.md#1-dialect-adapters-and-a-factory-for-multiple-databases)).
 - A `Collection` value expands for `IN` lists; an empty collection is rejected. Arrays bind as one
   value (for `= any(:ids)`).
 - `Instant` binds as a UTC `OffsetDateTime`; enums bind as `name()`; everything else goes to
@@ -158,8 +159,8 @@ List<User> active = db.query("select * from users where status = :status",
 - Queries are plain SQL that DBAs can read; injection through the API isn't possible.
 - The same code runs in or out of a transaction because both share `SqlOperations`.
 - Results are loaded into a `List`; streaming very large results is not supported yet.
-- The parser handles PostgreSQL's quoting rules; a future dialect with different quoting may need its
-  own rules.
+- Each dialect supplies its quoting rules, so a `:name` inside a MySQL backtick identifier or `#`
+  comment isn't mistaken for a parameter.
 
 ## 2. Transactions with deadlines, opt-in retry and safe commits
 
@@ -245,7 +246,7 @@ flowchart TD
     JS --> JC[run callback]
     JC --> JR[return, outer transaction decides]
     J -->|no| B[setAutoCommit false<br/>isolation, readOnly]
-    B --> T[statement timeout differs?<br/>set local statement_timeout]
+    B --> T[statement timeout differs?<br/>dialect override SQL]
     T --> N[longer than session?<br/>setNetworkTimeout + 5s]
     N --> C[run callback]
     C -->|exception| RB[rollback, rethrow]
@@ -255,7 +256,7 @@ flowchart TD
     CM -->|ConnectionLost| CU[CommitOutcomeUnknown]
     CM -->|other failure| TR[translated exception]
     CM -->|ok| OK[result]
-    JR --> REL[release connection]
+    JR --> REL[restore statement timeout if overridden<br/>release connection]
     RB --> REL
     TT --> REL
     CU --> REL
@@ -264,7 +265,8 @@ flowchart TD
 ```
 
 Hikari restores auto-commit, isolation, read-only and the network timeout when a connection returns to
-the pool; `set local` ends with the transaction.
+the pool. A statement-timeout override is undone with the dialect's restore SQL after commit or
+rollback; PostgreSQL's `set local` ends with the transaction anyway, MySQL's `set session` is set back.
 
 #### Retry loop
 
@@ -291,7 +293,7 @@ flowchart LR
 | Deadline check before each statement | Fails with `TransactionTimeout` without reaching the database |
 | JDBC query timeout per statement | `min(time left, statementTimeout)`, rounded up to whole seconds (JDBC's unit); a cancellation after the deadline becomes `TransactionTimeout` |
 | Deadline check before commit | A callback that overran rolls back with `TransactionTimeout` |
-| `set local statement_timeout` | Server-side limit for this transaction when it differs from the session's |
+| Dialect statement-timeout override | Server-side limit for this transaction when it differs from the session's; restored afterwards |
 | `setNetworkTimeout(statementTimeout + 5s)` | When the transaction allows longer statements than the session, so the socket backstop doesn't cut them short |
 
 #### Joined transactions
