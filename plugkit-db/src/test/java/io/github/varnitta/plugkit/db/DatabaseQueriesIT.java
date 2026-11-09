@@ -222,6 +222,46 @@ class DatabaseQueriesIT {
         }
     }
 
+    @Test
+    void readsByColumnIndexAndTypedTimeColumns() {
+        record Values(Long byIndex, boolean hasInstant, boolean hasUuid) {
+        }
+
+        Values values = db.queryOne("select 7::bigint as n, now() as ts, gen_random_uuid() as u", Params.empty(),
+                row -> new Values(row.get(1, Long.class), row.getInstant("ts") != null, row.getUuid("u") != null))
+                .orElseThrow();
+
+        assertThat(values).isEqualTo(new Values(7L, true, true));
+    }
+
+    @Test
+    void batchRowsMustExpandToTheSameSql() {
+        assertThatThrownBy(() -> db.batch("select * from users where id in (:ids)", List.of(
+                Params.of("ids", List.of(1)), Params.of("ids", List.of(1, 2)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageStartingWith("Every batch row must expand to the same SQL");
+    }
+
+    @Test
+    void emptyBatchInsideATransactionDoesNothing() {
+        int[] counts = db.inTransaction(tx -> tx.batch("insert into users (email, status) values (:e, 'ACTIVE')",
+                List.of()));
+
+        assertThat(counts).isEmpty();
+    }
+
+    @Test
+    void longSlowStatementsStillRun() {
+        try (Database verbose = Databases.create(TestPostgres.config()
+                .poolName("verbose")
+                .slowQueryThreshold(Duration.ofMillis(1))
+                .build())) {
+            String longSql = "select 1 as one /* " + "x".repeat(600) + " */ from pg_sleep(0.01)";
+
+            assertThat(verbose.query(longSql, Params.empty(), row -> row.getInt("one"))).containsExactly(1);
+        }
+    }
+
     private static void insertUser(String email) {
         db.update("insert into users (email, status) values (:e, 'ACTIVE')", Params.of("e", email));
     }

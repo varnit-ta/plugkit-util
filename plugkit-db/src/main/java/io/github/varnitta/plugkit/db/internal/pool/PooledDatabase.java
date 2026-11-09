@@ -178,13 +178,14 @@ public final class PooledDatabase implements Database {
             return;
         }
         Duration timeout = config.pool().shutdownTimeout();
+        boolean interrupted = false;
         try {
             if (!inFlight.stopNewWorkAndWait(timeout)) {
                 log.warn("Closing database pool '{}' with {} statements or transactions still running after "
                         + "waiting {} ms", config.poolName(), inFlight.runningCount(), timeout.toMillis());
             }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            interrupted = true;
             log.warn("Interrupted while waiting for running work on database pool '{}'; closing now",
                     config.poolName());
         }
@@ -192,6 +193,9 @@ public final class PooledDatabase implements Database {
             hikari.close();
         }
         log.info("Stopped database pool '{}'", config.poolName());
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     static boolean isLargeShare(int maxSize, int maxConnections) {

@@ -145,6 +145,8 @@ class NetworkFailureIT {
             assertThat(down.problem()).contains("pool=recover");
             assertThatThrownBy(() -> db.query("select 1", Params.empty(), row -> 1))
                     .isInstanceOf(DatabaseException.class);
+            assertThatThrownBy(() -> db.inTransaction(tx -> tx.query("select 1", Params.empty(), row -> 1)))
+                    .isInstanceOf(DatabaseException.class);
 
             proxy.enable();
             assertThat(db.health().healthy()).isTrue();

@@ -99,6 +99,18 @@ class TransactionRunnerTest {
         assertThat(calls).containsExactly("setAutoCommit", "createStatement", "commit", "close");
     }
 
+    @Test
+    void interruptDuringTheRetryWaitStopsRetrying() {
+        commitResults.add(new SQLException("could not serialize access", "40001"));
+        Thread.currentThread().interrupt();
+
+        assertThatThrownBy(() -> runner().run(TxOptions.builder().maxAttempts(3).build(), tx -> "done"))
+                .isInstanceOf(SerializationFailure.class)
+                .satisfies(e -> assertThat(e.getSuppressed()).hasAtLeastOneElementOfType(InterruptedException.class));
+        assertThat(Thread.interrupted()).isTrue();
+        assertThat(acquired).hasValue(1);
+    }
+
     private TransactionRunner runner() {
         ConnectionProvider provider = new ConnectionProvider() {
             @Override

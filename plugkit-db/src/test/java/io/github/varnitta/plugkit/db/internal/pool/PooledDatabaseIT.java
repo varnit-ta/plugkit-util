@@ -3,10 +3,10 @@ package io.github.varnitta.plugkit.db.internal.pool;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.varnitta.plugkit.core.Health;
 import io.github.varnitta.plugkit.db.Database;
 import io.github.varnitta.plugkit.db.DatabaseType;
 import io.github.varnitta.plugkit.db.Databases;
-import io.github.varnitta.plugkit.core.Health;
 import io.github.varnitta.plugkit.db.TestPostgres;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.config.PoolConfig;
@@ -15,6 +15,8 @@ import io.github.varnitta.plugkit.db.exception.ConnectionLost;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
 import io.github.varnitta.plugkit.db.exception.StatementTimeout;
 import io.github.varnitta.plugkit.db.internal.dialect.postgres.PostgresDialect;
+import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverrideScope;
+import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverrides;
 import io.github.varnitta.plugkit.db.sql.Params;
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -156,6 +158,46 @@ class PooledDatabaseIT {
         assertThatThrownBy(() -> running.get(10, TimeUnit.SECONDS))
                 .isInstanceOf(ExecutionException.class)
                 .hasCauseInstanceOf(DatabaseException.class);
+    }
+
+    @Test
+    void timeoutOverrideAppliesToAutoCommitStatements() {
+        try (Database db = Databases.create(config().poolName("override").build());
+             TimeoutOverrideScope scope = TimeoutOverrides.apply(Duration.ofMillis(2500), null)) {
+            String statementTimeout = db.queryOne("show statement_timeout", Params.empty(),
+                    row -> row.require("statement_timeout", String.class)).orElseThrow();
+
+            assertThat(statementTimeout).isEqualTo("2500ms");
+            assertThat(db.update("set local application_name = 'override'", Params.empty())).isZero();
+        }
+    }
+
+    @Test
+    void startsWithAWarningWhenThePoolIsLargeComparedToTheServerLimit() {
+        DatabaseConfig large = config()
+                .poolName("large")
+                .pool(PoolConfig.builder().maxSize(60).minIdle(1).build())
+                .build();
+
+        try (Database db = Databases.create(large)) {
+            assertThat(db.health().healthy()).isTrue();
+        }
+    }
+
+    @Test
+    void closeStopsWaitingWhenInterrupted() throws Exception {
+        Database db = Databases.create(config().poolName("interrupted").build());
+        CompletableFuture<List<Integer>> running = CompletableFuture.supplyAsync(() ->
+                db.query("select 1 as one from pg_sleep(2)", Params.empty(), row -> row.getInt("one")));
+        Thread.sleep(200);
+
+        Thread.currentThread().interrupt();
+        long start = System.nanoTime();
+        db.close();
+
+        assertThat(Thread.interrupted()).isTrue();
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(2));
+        assertThatThrownBy(() -> running.get(10, TimeUnit.SECONDS)).isInstanceOf(ExecutionException.class);
     }
 
     private static DatabaseConfig.DatabaseConfigBuilder config() {

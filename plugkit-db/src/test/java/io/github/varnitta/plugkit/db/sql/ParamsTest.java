@@ -69,6 +69,15 @@ class ParamsTest {
     }
 
     @Test
+    void fourPairsAndEqualityWork() {
+        Params params = Params.of("a", 1, "b", 2, "c", 3, "d", 4);
+
+        assertThat(params.names()).containsExactly("a", "b", "c", "d");
+        assertThat(params).isEqualTo(Params.of("a", 1, "b", 2, "c", 3).and("d", 4))
+                .hasSameHashCodeAs(Params.of("a", 1, "b", 2, "c", 3).and("d", 4));
+    }
+
+    @Test
     void emptyIsShared() {
         assertThat(Params.empty()).isSameAs(Params.empty());
         assertThat(Params.empty().names()).isEmpty();

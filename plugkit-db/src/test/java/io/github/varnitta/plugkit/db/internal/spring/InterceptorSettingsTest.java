@@ -44,6 +44,16 @@ class InterceptorSettingsTest {
     }
 
     @Test
+    @Timeouts(statement = "0s")
+    void nonPositiveTimeoutIsRejected() throws NoSuchMethodException {
+        Timeouts annotation = getClass().getDeclaredMethod("nonPositiveTimeoutIsRejected").getAnnotation(Timeouts.class);
+
+        assertThatThrownBy(() -> TimeoutsInterceptor.parse(annotation))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("@Timeouts statement must be positive, was '0s'");
+    }
+
+    @Test
     void transientFailuresAreRecognised() {
         assertThat(RetryOnTransientInterceptor.isTransient(new Deadlock("d", "40P01", null))).isTrue();
         assertThat(RetryOnTransientInterceptor.isTransient(new IllegalStateException(new Deadlock("d", "40P01", null))))

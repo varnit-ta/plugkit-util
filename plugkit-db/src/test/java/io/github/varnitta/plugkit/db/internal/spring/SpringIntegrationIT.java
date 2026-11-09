@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.health.contributor.Status;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
@@ -147,6 +148,45 @@ class SpringIntegrationIT {
         });
     }
 
+    @Test
+    void retryOnTransientLeavesOtherFailuresAndSingleAttemptsAlone() {
+        runner.withPropertyValues(plugkitProperties("single")).withUserConfiguration(Services.class).run(context -> {
+            EdgeCaseService service = context.getBean(EdgeCaseService.class);
+
+            assertThatThrownBy(service::failWithSerializationFailureOnce).isInstanceOf(SerializationFailure.class);
+            assertThatThrownBy(service::failWithApplicationError).isInstanceOf(IllegalStateException.class);
+            assertThat(service.calls()).isEqualTo(2);
+            assertThatThrownBy(service::invalidMaxAttempts)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("@RetryOnTransient maxAttempts must be between 1 and 10, was 0");
+        });
+    }
+
+    @Test
+    void classLevelTimeoutsApplyToEveryMethod() {
+        runner.withPropertyValues(plugkitProperties("class-level"))
+                .withPropertyValues("plugkit.db.session.statement-timeout=1s")
+                .withUserConfiguration(Services.class).run(context -> {
+                    Database database = context.getBean(Database.class);
+                    ClassLevelReportService reports = context.getBean(ClassLevelReportService.class);
+
+                    assertThat(reports.slowQuery(database)).containsExactly(1);
+                    assertThat(reports.slowQuery(database)).containsExactly(1);
+                });
+    }
+
+    @Test
+    void healthIndicatorReportsDownWithTheProblem() {
+        runner.withPropertyValues(plugkitProperties("down")).run(context -> {
+            context.getBean(Database.class).close();
+
+            Health health = context.getBean("plugkitDbHealthIndicator", HealthIndicator.class).health();
+
+            assertThat(health.getStatus()).isEqualTo(Status.DOWN);
+            assertThat(health.getDetails()).containsKey("problem").containsEntry("pool", "down");
+        });
+    }
+
     private static String[] plugkitProperties(String poolName) {
         return new String[] {
                 "plugkit.db.url=" + TestPostgres.container().getJdbcUrl(),
@@ -192,6 +232,16 @@ class SpringIntegrationIT {
         @Bean
         ReportService reportService() {
             return new ReportService();
+        }
+
+        @Bean
+        ClassLevelReportService classLevelReportService() {
+            return new ClassLevelReportService();
+        }
+
+        @Bean
+        EdgeCaseService edgeCaseService() {
+            return new EdgeCaseService();
         }
     }
 
@@ -254,6 +304,39 @@ class SpringIntegrationIT {
         @Transactional
         public List<Integer> slowQueryInTransactionWithLongerTimeout(Database database) {
             return slowQuery(database);
+        }
+    }
+
+    @Timeouts(statement = "10s")
+    public static class ClassLevelReportService {
+
+        public List<Integer> slowQuery(Database database) {
+            return database.query("select 1 as one from pg_sleep(2)", Params.empty(), row -> row.getInt("one"));
+        }
+    }
+
+    public static class EdgeCaseService {
+
+        private final AtomicInteger calls = new AtomicInteger();
+
+        public int calls() {
+            return calls.get();
+        }
+
+        @RetryOnTransient(maxAttempts = 1)
+        public void failWithSerializationFailureOnce() {
+            calls.incrementAndGet();
+            throw new SerializationFailure("simulated", "40001", null);
+        }
+
+        @RetryOnTransient
+        public void failWithApplicationError() {
+            calls.incrementAndGet();
+            throw new IllegalStateException("not a database problem");
+        }
+
+        @RetryOnTransient(maxAttempts = 0)
+        public void invalidMaxAttempts() {
         }
     }
 }

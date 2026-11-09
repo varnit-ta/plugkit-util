@@ -214,6 +214,14 @@ class TransactionsIT {
         assertThat(failures).isEqualTo(1);
     }
 
+    @Test
+    void unknownColumnInsideATransactionIsQueryFailure() {
+        assertThatThrownBy(() -> db.inTransaction(tx -> tx.query("select 1 as one", Params.empty(),
+                row -> row.getString("nope"))))
+                .isInstanceOf(QueryFailure.class)
+                .hasMessageContaining("pool=tx");
+    }
+
     private static List<Future<String>> runCrossingTransfers(TxOptions options, AtomicInteger attempts)
             throws InterruptedException {
         CyclicBarrier bothLockedFirstRow = new CyclicBarrier(2);
