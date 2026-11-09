@@ -14,32 +14,14 @@ import org.jspecify.annotations.Nullable;
  */
 public final class TimeoutOverrides {
 
-    private static final ThreadLocal<@Nullable Overrides> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<@Nullable TimeoutOverride> CURRENT = new ThreadLocal<>();
 
     private TimeoutOverrides() {
     }
 
-    /**
-     * The overrides in effect on the current thread.
-     *
-     * @param statement   the statement timeout, or {@code null} for the configured default
-     * @param transaction the transaction timeout, or {@code null} for the configured default
-     */
-    public record Overrides(@Nullable Duration statement, @Nullable Duration transaction) {
-    }
-
-    /**
-     * Restores the previous overrides when closed.
-     */
-    @FunctionalInterface
-    public interface Scope extends AutoCloseable {
-        @Override
-        void close();
-    }
-
-    public static Scope apply(@Nullable Duration statement, @Nullable Duration transaction) {
-        Overrides previous = CURRENT.get();
-        CURRENT.set(new Overrides(statement, transaction));
+    public static TimeoutOverrideScope apply(@Nullable Duration statement, @Nullable Duration transaction) {
+        TimeoutOverride previous = CURRENT.get();
+        CURRENT.set(new TimeoutOverride(statement, transaction));
         return () -> {
             if (previous == null) {
                 CURRENT.remove();
@@ -50,12 +32,12 @@ public final class TimeoutOverrides {
     }
 
     public static @Nullable Duration statement() {
-        Overrides overrides = CURRENT.get();
-        return overrides == null ? null : overrides.statement();
+        TimeoutOverride override = CURRENT.get();
+        return override == null ? null : override.statement();
     }
 
     public static @Nullable Duration transaction() {
-        Overrides overrides = CURRENT.get();
-        return overrides == null ? null : overrides.transaction();
+        TimeoutOverride override = CURRENT.get();
+        return override == null ? null : override.transaction();
     }
 }

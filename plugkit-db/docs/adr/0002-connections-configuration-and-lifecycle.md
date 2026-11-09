@@ -75,13 +75,13 @@ flowchart TD
 | `Databases` | Public factory: `create(DatabaseConfig)`, `create(DataSource)` |
 | `PooledDatabase` | The `Database` implementation; `start` owns a pool, `wrap` borrows one |
 | `HikariPoolFactory` | Maps `DatabaseConfig` onto `HikariConfig`, applies the dialect's connection properties, translates a failed first connection |
-| `DriverCheck` | Fails fast with `InvalidConfigException`: `type 'postgres' needs the JDBC driver org.postgresql.Driver: add the dependency org.postgresql:postgresql` |
+| `DriverCheck` | Fails fast with `InvalidConfigException`: `database type 'postgres' needs the JDBC driver org.postgresql.Driver: add the dependency org.postgresql:postgresql` |
 | `ConnectionProvider` | Where each call gets its connection ([ADR-0005 part 1](0005-integrations.md#1-integration-adapters-and-factories)) |
 
 #### Startup sequence for an owned pool
 
 1. Records validate themselves on construction; invalid config throws `InvalidConfigException`.
-2. The dialect for `type` is looked up and the driver class is checked.
+2. The dialect for `databaseType` is looked up and the driver class is checked.
 3. Hikari starts and opens its first connection. A failure is translated by the dialect, for example
    `ConnectionLost` for an unreachable host (bounded by the 5s connect timeout) or `QueryFailure` with
    SQLState `28P01` for a wrong password. No pool is left behind.
@@ -124,7 +124,7 @@ which hides mistakes.
 - **Secrets never reach logs.** `DatabaseConfig.toString()` redacts the password, any driver property
   whose key contains `password`, `secret` or `token`, the same keys in URL query parameters, and the
   password in `user:password@host`.
-- The `type` setting is optional and inferred from the URL
+- The `databaseType` setting is optional and inferred from the URL
   ([ADR-0003 part 1](0003-multi-database-support.md#1-dialect-adapters-and-a-factory-for-multiple-databases)).
 
 ### Structure
@@ -133,7 +133,7 @@ which hides mistakes.
 classDiagram
     class DatabaseConfig {
         <<record>>
-        +DatabaseType type
+        +DatabaseType databaseType
         +String url
         +String user
         +String password
@@ -203,7 +203,7 @@ flowchart LR
 
 | Key | Default | Applied by |
 |---|---|---|
-| `type` | inferred from `url` | Dialect selection |
+| `databaseType` (Spring: `database-type`) | inferred from `url` | Dialect selection |
 | `url`, `user`, `password` | — (`url` required) | Driver |
 | `poolName` | `plugkit-db` | Hikari, logs, metrics, error messages |
 | `pool.maxSize` | 10 | Hikari |
@@ -235,7 +235,7 @@ the defaults.
 
 #### Validation rules
 
-- `url` missing, not starting with `jdbc:`, or not for a supported database; `type` set but not
+- `url` missing, not starting with `jdbc:`, or not for a supported database; `databaseType` set but not
   matching the URL
 - `poolName` blank; driver property with a blank key or a `null` value
 - `pool.maxSize < 1`; `pool.minIdle` outside `0..pool.maxSize`
@@ -254,7 +254,7 @@ The "less than `maxLifetime`" checks run only when `maxLifetime` itself is valid
 doesn't produce a cascade of messages.
 
 ```
-InvalidConfigException: Invalid plugkit-db configuration:
+InvalidConfigException: Invalid plugkit configuration:
   - pool.maxSize must be at least 1, was 0
   - session.lockTimeout must be at least 1ms, was 0ms
 ```
@@ -299,17 +299,17 @@ classDiagram
         -InFlightTracker inFlight
         -AtomicBoolean closing
         +close()
-        -tracked(work)
+        -runTracked(work)
     }
     class InFlightTracker {
-        <<internal.pool>>
+        <<plugkit-core>>
         -ReentrantLock lock
-        -Condition drained
-        -ThreadLocal depth
-        +enter()
-        +exit()
-        +closeAndAwait(timeout) boolean
-        +active() int
+        -Condition nothingRunning
+        -ThreadLocal nestingPerThread
+        +startWork()
+        +finishWork()
+        +stopNewWorkAndWait(timeout) boolean
+        +runningCount() int
     }
     PooledDatabase *-- InFlightTracker
 ```
@@ -321,14 +321,14 @@ sequenceDiagram
     participant T as InFlightTracker
     participant H as HikariDataSource
     W->>PD: query(...)
-    PD->>T: enter()
+    PD->>T: startWork()
     Note over W,PD: statement running
     participant S as Shutdown thread
     S->>PD: close()
-    PD->>T: closeAndAwait(shutdownTimeout)
-    Note over T: closed = true, new enter() from other threads throws
+    PD->>T: stopNewWorkAndWait(shutdownTimeout)
+    Note over T: shuttingDown = true, new startWork() from other threads throws
     W->>PD: statement finishes
-    PD->>T: exit() (signals drained)
+    PD->>T: finishWork() (signals nothing running)
     T-->>PD: true
     PD->>H: close() (only if owned)
 ```

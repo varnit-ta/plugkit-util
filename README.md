@@ -23,7 +23,7 @@ Each library is an independent module: use one, some or all of them.
 | **Database** | Generic database interaction behind interfaces. Postgres first; other databases later |
 | **Kafka** | Kafka interaction (producing, consuming, transactions). Works with anything that speaks the Kafka protocol |
 | **Cache** | Generic caching. Redis and in-memory first; others such as Memcached later |
-| **Resilience** | Timeouts, retries, circuit breakers and bulkheads |
+| **Core** | Shared building blocks every library uses: configuration validation, retries, graceful shutdown, health and a common exception base. Resilience patterns (timeouts, retries, circuit breakers, bulkheads) live here |
 
 ## How it works
 

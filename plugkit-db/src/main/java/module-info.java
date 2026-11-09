@@ -15,6 +15,7 @@ import org.jspecify.annotations.NullMarked;
  */
 @NullMarked
 module io.github.varnitta.plugkit.db {
+    requires transitive io.github.varnitta.plugkit.core;
     requires java.sql;
     requires com.zaxxer.hikari;
     requires org.slf4j;

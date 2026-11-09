@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.varnitta.plugkit.db.Database;
 import io.github.varnitta.plugkit.db.DatabaseType;
 import io.github.varnitta.plugkit.db.Databases;
-import io.github.varnitta.plugkit.db.Health;
+import io.github.varnitta.plugkit.core.Health;
 import io.github.varnitta.plugkit.db.TestPostgres;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.config.PoolConfig;
@@ -36,7 +36,7 @@ class PooledDatabaseIT {
         try (Database db = Databases.create(config().build())) {
             Health health = db.health();
 
-            assertThat(db.type()).isEqualTo(DatabaseType.POSTGRES);
+            assertThat(db.databaseType()).isEqualTo(DatabaseType.POSTGRES);
             assertThat(db.poolName()).isEqualTo("it");
             assertThat(health.healthy()).isTrue();
             assertThat(health.problem()).isNull();

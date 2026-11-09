@@ -54,7 +54,7 @@ class MicrometerMetricsRecorderTest {
 
     @Test
     void noMetricsIgnoresEverything() {
-        MetricsRecorder none = MetricsRecorder.Factory.none().forPool("x");
+        MetricsRecorder none = MetricsRecorderFactory.none().forPool("x");
         none.statement("query", Duration.ZERO, null);
         none.transaction(Duration.ZERO, null);
         none.retry(new IllegalStateException());

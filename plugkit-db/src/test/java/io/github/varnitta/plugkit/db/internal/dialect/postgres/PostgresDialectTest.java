@@ -11,7 +11,7 @@ import io.github.varnitta.plugkit.db.exception.ConstraintViolation;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
 import io.github.varnitta.plugkit.db.exception.Deadlock;
 import io.github.varnitta.plugkit.db.exception.ForeignKeyViolation;
-import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import io.github.varnitta.plugkit.db.exception.LockTimeout;
 import io.github.varnitta.plugkit.db.exception.NotNullViolation;
 import io.github.varnitta.plugkit.db.exception.QueryFailure;
@@ -39,7 +39,7 @@ class PostgresDialectTest {
     @Test
     void isRegisteredForPostgres() {
         assertThat(Dialects.forType(DatabaseType.POSTGRES)).isInstanceOf(PostgresDialect.class);
-        assertThat(dialect.type()).isEqualTo(DatabaseType.POSTGRES);
+        assertThat(dialect.databaseType()).isEqualTo(DatabaseType.POSTGRES);
         assertThat(dialect.driverClassName()).isEqualTo("org.postgresql.Driver");
         assertThat(dialect.driverArtifact()).isEqualTo("org.postgresql:postgresql");
         assertThat(dialect.maxConnectionsQuery()).isEqualTo("show max_connections");

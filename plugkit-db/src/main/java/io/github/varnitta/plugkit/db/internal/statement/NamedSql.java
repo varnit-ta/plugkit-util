@@ -27,8 +27,6 @@ final class NamedSql {
         this.names = names;
     }
 
-    record Bound(String sql, List<@Nullable Object> values) {
-    }
 
     static NamedSql parse(String sql) {
         List<String> texts = new ArrayList<>();
@@ -68,7 +66,7 @@ final class NamedSql {
         return new NamedSql(List.copyOf(texts), List.copyOf(names));
     }
 
-    Bound bind(Params params) {
+    BoundSql bind(Params params) {
         StringBuilder sql = new StringBuilder(texts.getFirst());
         List<@Nullable Object> values = new ArrayList<>();
         for (int i = 0; i < names.size(); i++) {
@@ -89,7 +87,7 @@ final class NamedSql {
             }
             sql.append(texts.get(i + 1));
         }
-        return new Bound(sql.toString(), values);
+        return new BoundSql(sql.toString(), values);
     }
 
     List<String> parameterNames() {

@@ -1,5 +1,7 @@
 package io.github.varnitta.plugkit.db.internal.spring;
 
+import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverride;
+import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverrideScope;
 import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverrides;
 import io.github.varnitta.plugkit.db.spring.Timeouts;
 import java.time.Duration;
@@ -14,22 +16,22 @@ import org.springframework.boot.convert.DurationStyle;
  */
 final class TimeoutsInterceptor implements MethodInterceptor {
 
-    private final AnnotationLookup<Timeouts, TimeoutOverrides.Overrides> overrides =
+    private final AnnotationLookup<Timeouts, TimeoutOverride> overrides =
             new AnnotationLookup<>(Timeouts.class, TimeoutsInterceptor::parse);
 
     @Override
     public @Nullable Object invoke(MethodInvocation invocation) throws Throwable {
-        TimeoutOverrides.Overrides settings = overrides.find(invocation);
+        TimeoutOverride settings = overrides.find(invocation);
         if (settings == null) {
             return invocation.proceed();
         }
-        try (TimeoutOverrides.Scope scope = TimeoutOverrides.apply(settings.statement(), settings.transaction())) {
+        try (TimeoutOverrideScope scope = TimeoutOverrides.apply(settings.statement(), settings.transaction())) {
             return invocation.proceed();
         }
     }
 
-    static TimeoutOverrides.Overrides parse(Timeouts annotation) {
-        return new TimeoutOverrides.Overrides(duration("statement", annotation.statement()),
+    static TimeoutOverride parse(Timeouts annotation) {
+        return new TimeoutOverride(duration("statement", annotation.statement()),
                 duration("transaction", annotation.transaction()));
     }
 

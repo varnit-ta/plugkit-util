@@ -1,4 +1,4 @@
-package io.github.varnitta.plugkit.db.internal.pool;
+package io.github.varnitta.plugkit.core.internal.lifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -11,35 +11,35 @@ import org.junit.jupiter.api.Test;
 
 class InFlightTrackerTest {
 
-    private final InFlightTracker tracker = new InFlightTracker("unit");
+    private final InFlightTracker tracker = new InFlightTracker("Database pool 'unit'");
 
     @Test
-    void closeWithNothingRunningReturnsImmediately() throws InterruptedException {
-        assertThat(tracker.closeAndAwait(Duration.ofSeconds(5))).isTrue();
+    void stoppingWithNothingRunningReturnsImmediately() throws InterruptedException {
+        assertThat(tracker.stopNewWorkAndWait(Duration.ofSeconds(5))).isTrue();
     }
 
     @Test
-    void newWorkIsRejectedAfterClose() throws InterruptedException {
-        tracker.closeAndAwait(Duration.ZERO);
+    void newWorkIsRefusedAfterStopping() throws InterruptedException {
+        tracker.stopNewWorkAndWait(Duration.ZERO);
 
-        assertThatThrownBy(tracker::enter)
+        assertThatThrownBy(tracker::startWork)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Database pool 'unit' is closed");
     }
 
     @Test
-    void closeWaitsForRunningWork() throws Exception {
+    void stoppingWaitsForRunningWork() throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         CompletableFuture<Void> worker = CompletableFuture.runAsync(() -> {
-            tracker.enter();
+            tracker.startWork();
             entered.countDown();
             await(release);
-            tracker.exit();
+            tracker.finishWork();
         });
         entered.await(5, TimeUnit.SECONDS);
 
-        CompletableFuture<Boolean> closing = CompletableFuture.supplyAsync(() -> close(Duration.ofSeconds(10)));
+        CompletableFuture<Boolean> closing = CompletableFuture.supplyAsync(() -> stopAndWait(Duration.ofSeconds(10)));
         Thread.sleep(200);
         assertThat(closing).isNotDone();
 
@@ -49,33 +49,33 @@ class InFlightTrackerTest {
     }
 
     @Test
-    void closeGivesUpAfterTheTimeout() throws Exception {
-        tracker.enter();
+    void stoppingGivesUpAfterTheTimeout() throws Exception {
+        tracker.startWork();
 
         long start = System.nanoTime();
-        boolean drained = tracker.closeAndAwait(Duration.ofMillis(200));
+        boolean drained = tracker.stopNewWorkAndWait(Duration.ofMillis(200));
 
         assertThat(drained).isFalse();
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isBetween(Duration.ofMillis(150), Duration.ofSeconds(2));
-        assertThat(tracker.active()).isEqualTo(1);
+        assertThat(tracker.runningCount()).isEqualTo(1);
     }
 
     @Test
-    void nestedCallsFromRunningWorkAreAllowedDuringClose() throws Exception {
-        tracker.enter();
-        CompletableFuture<Boolean> closing = CompletableFuture.supplyAsync(() -> close(Duration.ofSeconds(10)));
+    void nestedWorkFromARunningThreadIsAllowedWhileStopping() throws Exception {
+        tracker.startWork();
+        CompletableFuture<Boolean> closing = CompletableFuture.supplyAsync(() -> stopAndWait(Duration.ofSeconds(10)));
         Thread.sleep(100);
 
-        tracker.enter();
-        tracker.exit();
-        tracker.exit();
+        tracker.startWork();
+        tracker.finishWork();
+        tracker.finishWork();
 
         assertThat(closing.get(5, TimeUnit.SECONDS)).isTrue();
     }
 
-    private boolean close(Duration timeout) {
+    private boolean stopAndWait(Duration timeout) {
         try {
-            return tracker.closeAndAwait(timeout);
+            return tracker.stopNewWorkAndWait(timeout);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);

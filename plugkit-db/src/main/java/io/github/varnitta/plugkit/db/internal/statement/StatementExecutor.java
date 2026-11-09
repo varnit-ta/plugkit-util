@@ -15,9 +15,8 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Prepares, binds and runs statements on a given connection, and logs statements slower than
@@ -26,11 +25,11 @@ import org.slf4j.LoggerFactory;
  * <p>A query timeout of {@code 0} seconds means no client-side limit; the server's statement timeout
  * still applies.
  */
+@Slf4j
 public final class StatementExecutor {
 
     public static final int NO_QUERY_TIMEOUT = 0;
 
-    private static final Logger LOG = LoggerFactory.getLogger(StatementExecutor.class);
     private static final int MAX_LOGGED_SQL_LENGTH = 500;
 
     private final String poolName;
@@ -43,7 +42,7 @@ public final class StatementExecutor {
 
     public <T> List<T> query(Connection connection, String sql, Params params, RowMapper<T> mapper, int maxRows,
                       int queryTimeoutSeconds) throws SQLException {
-        NamedSql.Bound bound = NamedSql.parse(sql).bind(params);
+        BoundSql bound = NamedSql.parse(sql).bind(params);
         long start = System.nanoTime();
         try (PreparedStatement statement = connection.prepareStatement(bound.sql())) {
             statement.setMaxRows(maxRows);
@@ -73,7 +72,7 @@ public final class StatementExecutor {
     }
 
     public int update(Connection connection, String sql, Params params, int queryTimeoutSeconds) throws SQLException {
-        NamedSql.Bound bound = NamedSql.parse(sql).bind(params);
+        BoundSql bound = NamedSql.parse(sql).bind(params);
         long start = System.nanoTime();
         try (PreparedStatement statement = connection.prepareStatement(bound.sql())) {
             statement.setQueryTimeout(queryTimeoutSeconds);
@@ -90,7 +89,7 @@ public final class StatementExecutor {
             return new int[0];
         }
         NamedSql parsed = NamedSql.parse(sql);
-        List<NamedSql.Bound> bound = rows.stream().map(parsed::bind).toList();
+        List<BoundSql> bound = rows.stream().map(parsed::bind).toList();
         String expandedSql = bound.getFirst().sql();
         if (bound.stream().anyMatch(row -> !row.sql().equals(expandedSql))) {
             throw new IllegalArgumentException(
@@ -99,7 +98,7 @@ public final class StatementExecutor {
         long start = System.nanoTime();
         try (PreparedStatement statement = connection.prepareStatement(expandedSql)) {
             statement.setQueryTimeout(queryTimeoutSeconds);
-            for (NamedSql.Bound row : bound) {
+            for (BoundSql row : bound) {
                 bindValues(statement, row.values());
                 statement.addBatch();
             }
@@ -126,7 +125,7 @@ public final class StatementExecutor {
     private void logIfSlow(String sql, long startNanos) {
         Duration elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
         if (elapsed.compareTo(slowQueryThreshold) > 0) {
-            LOG.warn("Slow query on pool '{}' took {} ms: {}", poolName, elapsed.toMillis(), abbreviate(sql));
+            log.warn("Slow query on pool '{}' took {} ms: {}", poolName, elapsed.toMillis(), abbreviate(sql));
         }
     }
 

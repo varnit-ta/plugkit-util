@@ -7,7 +7,7 @@ pieces plug together.
 
 | ADR | Question | Parts |
 |---|---|---|
-| [0001 Architecture and structure](0001-architecture-and-structure.md) | How is the library packaged and organised, and how is that kept? | 1. Recording decisions · 2. One artifact with optional integrations · 3. Feature packages with a private `internal` tree · 4. Testing strategy |
+| [0001 Architecture and structure](0001-architecture-and-structure.md) | How is the library packaged and organised, and how is that kept? | 1. Recording decisions · 2. One artifact with optional integrations · 3. Feature packages with a private `internal` tree · 4. Testing strategy · 5. Shared `plugkit-core` module |
 | [0002 Connections, configuration and lifecycle](0002-connections-configuration-and-lifecycle.md) | How is a `Database` created, configured and shut down? | 1. DataSource-first connections · 2. Configuration model · 3. Graceful shutdown |
 | [0003 Multi-database support](0003-multi-database-support.md) | How do databases plug in, and how do their errors look the same? | 1. Dialect adapters and factory · 2. Vendor-neutral error model |
 | [0004 Running SQL](0004-running-sql.md) | How do statements and transactions run safely? | 1. Statements and row mapping · 2. Transactions · 3. Timeouts at every layer |

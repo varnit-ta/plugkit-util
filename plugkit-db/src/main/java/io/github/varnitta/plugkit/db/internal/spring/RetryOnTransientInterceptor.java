@@ -1,14 +1,13 @@
 package io.github.varnitta.plugkit.db.internal.spring;
 
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
-import io.github.varnitta.plugkit.db.internal.tx.Backoff;
+import io.github.varnitta.plugkit.core.internal.retry.Backoff;
 import io.github.varnitta.plugkit.db.spring.RetryOnTransient;
 import io.github.varnitta.plugkit.db.tx.TxOptions;
+import lombok.extern.slf4j.Slf4j;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.aop.ProxyMethodInvocation;
 import org.springframework.dao.TransientDataAccessException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -21,9 +20,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * which Spring's transaction manager throws for failures at commit. A call made while a transaction is
  * already active runs once, because only the outermost transaction can be rerun.
  */
+@Slf4j
 final class RetryOnTransientInterceptor implements MethodInterceptor {
-
-    private static final Logger LOG = LoggerFactory.getLogger(RetryOnTransientInterceptor.class);
 
     private final AnnotationLookup<RetryOnTransient, Integer> maxAttempts =
             new AnnotationLookup<>(RetryOnTransient.class, RetryOnTransientInterceptor::validMaxAttempts);
@@ -42,7 +40,7 @@ final class RetryOnTransientInterceptor implements MethodInterceptor {
                 if (attempt >= attempts || !isTransient(failure)) {
                     throw failure;
                 }
-                LOG.info("Retrying {} after {} (attempt {} of {})", invocation.getMethod().getName(),
+                log.info("Retrying {} after {} (attempt {} of {})", invocation.getMethod().getName(),
                         failure.getClass().getSimpleName(), attempt + 1, attempts);
                 Thread.sleep(Backoff.delay(attempt));
             }

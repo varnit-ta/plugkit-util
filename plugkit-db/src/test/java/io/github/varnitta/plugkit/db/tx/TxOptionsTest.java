@@ -3,7 +3,7 @@ package io.github.varnitta.plugkit.db.tx;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

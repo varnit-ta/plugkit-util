@@ -3,7 +3,7 @@ package io.github.varnitta.plugkit.db.config;
 import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
 
-import io.github.varnitta.plugkit.db.internal.validation.ConfigValidator;
+import io.github.varnitta.plugkit.core.internal.validation.ConfigValidator;
 import java.time.Duration;
 import lombok.Builder;
 import org.jspecify.annotations.Nullable;

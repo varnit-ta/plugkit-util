@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.varnitta.plugkit.db.exception.Deadlock;
 import io.github.varnitta.plugkit.db.exception.UniqueViolation;
+import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverride;
+import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverrideScope;
 import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverrides;
 import io.github.varnitta.plugkit.db.spring.Timeouts;
 import java.time.Duration;
@@ -20,7 +22,7 @@ class InterceptorSettingsTest {
         Timeouts annotation = getClass().getDeclaredMethod("timeoutsAreParsed").getAnnotation(Timeouts.class);
 
         assertThat(TimeoutsInterceptor.parse(annotation))
-                .isEqualTo(new TimeoutOverrides.Overrides(Duration.ofMinutes(5), Duration.ofMillis(1500)));
+                .isEqualTo(new TimeoutOverride(Duration.ofMinutes(5), Duration.ofMillis(1500)));
     }
 
     @Test
@@ -54,8 +56,8 @@ class InterceptorSettingsTest {
 
     @Test
     void overridesNestAndRestore() {
-        try (TimeoutOverrides.Scope outer = TimeoutOverrides.apply(Duration.ofMinutes(1), null)) {
-            try (TimeoutOverrides.Scope inner = TimeoutOverrides.apply(Duration.ofMinutes(5), Duration.ofMinutes(10))) {
+        try (TimeoutOverrideScope outer = TimeoutOverrides.apply(Duration.ofMinutes(1), null)) {
+            try (TimeoutOverrideScope inner = TimeoutOverrides.apply(Duration.ofMinutes(5), Duration.ofMinutes(10))) {
                 assertThat(TimeoutOverrides.statement()).isEqualTo(Duration.ofMinutes(5));
                 assertThat(TimeoutOverrides.transaction()).isEqualTo(Duration.ofMinutes(10));
             }

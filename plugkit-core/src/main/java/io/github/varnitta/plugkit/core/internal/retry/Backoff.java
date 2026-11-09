@@ -1,4 +1,4 @@
-package io.github.varnitta.plugkit.db.internal.tx;
+package io.github.varnitta.plugkit.core.internal.retry;
 
 import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;

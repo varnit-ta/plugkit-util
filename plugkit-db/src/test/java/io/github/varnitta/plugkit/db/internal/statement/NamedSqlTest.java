@@ -15,7 +15,7 @@ class NamedSqlTest {
 
     @Test
     void replacesNamedParametersInOrder() {
-        NamedSql.Bound bound = NamedSql.parse("select * from t where a = :a and b = :b_2")
+        BoundSql bound = NamedSql.parse("select * from t where a = :a and b = :b_2")
                 .bind(Params.of("b_2", 2, "a", 1));
 
         assertThat(bound.sql()).isEqualTo("select * from t where a = ? and b = ?");
@@ -24,7 +24,7 @@ class NamedSqlTest {
 
     @Test
     void repeatedNameBindsEachOccurrence() {
-        NamedSql.Bound bound = NamedSql.parse("select :x, :x").bind(Params.of("x", "v"));
+        BoundSql bound = NamedSql.parse("select :x, :x").bind(Params.of("x", "v"));
 
         assertThat(bound.sql()).isEqualTo("select ?, ?");
         assertThat(bound.values()).containsExactly("v", "v");
@@ -32,7 +32,7 @@ class NamedSqlTest {
 
     @Test
     void nullValuesAreBound() {
-        NamedSql.Bound bound = NamedSql.parse("update t set a = :a").bind(Params.of("a", null));
+        BoundSql bound = NamedSql.parse("update t set a = :a").bind(Params.of("a", null));
 
         assertThat(bound.values()).containsExactly((Object) null);
     }
@@ -59,7 +59,7 @@ class NamedSqlTest {
 
     @Test
     void castAfterParameterIsKept() {
-        NamedSql.Bound bound = NamedSql.parse("select :id::uuid").bind(Params.of("id", "x"));
+        BoundSql bound = NamedSql.parse("select :id::uuid").bind(Params.of("id", "x"));
 
         assertThat(bound.sql()).isEqualTo("select ?::uuid");
     }
@@ -71,7 +71,7 @@ class NamedSqlTest {
 
     @Test
     void collectionsExpandForInLists() {
-        NamedSql.Bound bound = NamedSql.parse("select * from t where id in (:ids) and s = :s")
+        BoundSql bound = NamedSql.parse("select * from t where id in (:ids) and s = :s")
                 .bind(Params.of("ids", List.of(1, 2, 3), "s", "x"));
 
         assertThat(bound.sql()).isEqualTo("select * from t where id in (?, ?, ?) and s = ?");
@@ -80,7 +80,7 @@ class NamedSqlTest {
 
     @Test
     void singleElementCollection() {
-        NamedSql.Bound bound = NamedSql.parse("where id in (:ids)").bind(Params.of("ids", Set.of(7)));
+        BoundSql bound = NamedSql.parse("where id in (:ids)").bind(Params.of("ids", Set.of(7)));
 
         assertThat(bound.sql()).isEqualTo("where id in (?)");
     }
@@ -88,7 +88,7 @@ class NamedSqlTest {
     @Test
     void arraysAreBoundAsSingleValues() {
         Integer[] ids = {1, 2};
-        NamedSql.Bound bound = NamedSql.parse("where id = any(:ids)").bind(Params.of("ids", ids));
+        BoundSql bound = NamedSql.parse("where id = any(:ids)").bind(Params.of("ids", ids));
 
         assertThat(bound.sql()).isEqualTo("where id = any(?)");
         assertThat(bound.values()).hasSize(1);

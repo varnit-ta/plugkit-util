@@ -1,19 +1,20 @@
 package io.github.varnitta.plugkit.db.internal.pool;
 
 import com.zaxxer.hikari.HikariDataSource;
-import com.zaxxer.hikari.HikariPoolMXBean;
+import io.github.varnitta.plugkit.core.Health;
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
+import io.github.varnitta.plugkit.core.internal.lifecycle.InFlightTracker;
 import io.github.varnitta.plugkit.db.Database;
 import io.github.varnitta.plugkit.db.DatabaseType;
-import io.github.varnitta.plugkit.db.Health;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
-import io.github.varnitta.plugkit.db.exception.AcquireTimeout;
 import io.github.varnitta.plugkit.db.exception.ConnectionLost;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
-import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
 import io.github.varnitta.plugkit.db.internal.connection.ConnectionProvider;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialects;
 import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
+import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorderFactory;
+import io.github.varnitta.plugkit.db.internal.statement.SqlFunction;
 import io.github.varnitta.plugkit.db.internal.statement.StatementExecutor;
 import io.github.varnitta.plugkit.db.internal.statement.UncheckedSqlException;
 import io.github.varnitta.plugkit.db.internal.tx.TimeoutOverrides;
@@ -25,7 +26,6 @@ import io.github.varnitta.plugkit.db.tx.TxOptions;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.SQLTransientConnectionException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.List;
@@ -35,9 +35,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * The {@link io.github.varnitta.plugkit.db.Database} implementation.
@@ -46,19 +46,21 @@ import org.slf4j.LoggerFactory;
  * {@link DataSource} the application already has ({@link #wrap}); a wrapped pool is never closed.
  * Statements get their connection from a {@link ConnectionProvider}, so an integration can make them
  * join its transactions. Errors are translated through the dialect, pool exhaustion is reported as
- * {@link AcquireTimeout}, and transactions are handed to {@link TransactionRunner}.
+ * {@link io.github.varnitta.plugkit.db.exception.AcquireTimeout} through
+ * {@link TranslatingConnectionProvider}, and transactions are handed to {@link TransactionRunner}.
  *
  * <p>{@link #close()} stops new work, waits up to {@code pool.shutdownTimeout} for running statements
  * and transactions, then closes the pool if it owns it.
  */
+@Slf4j
 public final class PooledDatabase implements Database {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PooledDatabase.class);
     private static final int HEALTH_CHECK_TIMEOUT_SECONDS = 2;
     private static final String WRAPPED_POOL_NAME = "datasource";
 
     private final DatabaseConfig config;
     private final Dialect dialect;
+    @Getter
     private final DataSource dataSource;
     private final @Nullable HikariDataSource hikari;
     private final boolean ownsPool;
@@ -77,32 +79,33 @@ public final class PooledDatabase implements Database {
         this.hikari = unwrapHikari(dataSource);
         this.ownsPool = ownsPool;
         this.metrics = metrics;
-        this.connections = new TranslatingProvider(providers.apply(dataSource));
+        this.connections = new TranslatingConnectionProvider(providers.apply(dataSource), config.poolName(), hikari,
+                config.pool().acquireTimeout());
         this.executor = new StatementExecutor(config.poolName(), config.slowQueryThreshold());
         this.transactions = new TransactionRunner(connections, dialect, config, executor, metrics);
-        this.inFlight = new InFlightTracker(config.poolName());
+        this.inFlight = new InFlightTracker("Database pool '" + config.poolName() + "'");
     }
 
-    public static PooledDatabase start(DatabaseConfig config, MetricsRecorder.Factory metrics,
+    public static PooledDatabase start(DatabaseConfig config, MetricsRecorderFactory metrics,
                                        Function<DataSource, ConnectionProvider> providers) {
-        Dialect dialect = Dialects.forType(config.type());
+        Dialect dialect = Dialects.forType(config.databaseType());
         DriverCheck.requireDriver(dialect);
         MetricsRecorder recorder = metrics.forPool(config.poolName());
         HikariDataSource pool = HikariPoolFactory.start(config, dialect, recorder);
         PooledDatabase database = new PooledDatabase(config, dialect, pool, true, providers, recorder);
         database.warnIfPoolIsLarge();
-        LOG.info("Started database pool '{}' ({}, maxSize={})", config.poolName(), config.type().configName(),
+        log.info("Started database pool '{}' ({}, maxSize={})", config.poolName(), config.databaseType().configName(),
                 config.pool().maxSize());
         return database;
     }
 
-    public static PooledDatabase wrap(DataSource dataSource, MetricsRecorder.Factory metrics,
+    public static PooledDatabase wrap(DataSource dataSource, MetricsRecorderFactory metrics,
                                       Function<DataSource, ConnectionProvider> providers) {
         HikariDataSource hikari = unwrapHikari(dataSource);
         String poolName = hikari != null && hikari.getPoolName() != null ? hikari.getPoolName() : WRAPPED_POOL_NAME;
         DatabaseConfig config = configFor(dataSource, poolName);
-        Dialect dialect = Dialects.forType(config.type());
-        LOG.info("Using existing DataSource as database pool '{}' ({})", poolName, config.type().configName());
+        Dialect dialect = Dialects.forType(config.databaseType());
+        log.info("Using existing DataSource as database pool '{}' ({})", poolName, config.databaseType().configName());
         return new PooledDatabase(config, dialect, dataSource, false, providers, metrics.forPool(poolName));
     }
 
@@ -111,7 +114,7 @@ public final class PooledDatabase implements Database {
         if (TimeoutOverrides.statement() != null) {
             return inTransaction(transaction -> transaction.query(sql, params, mapper));
         }
-        return tracked(() -> withConnection("query", connection -> executor.query(connection, sql, params, mapper,
+        return runTracked(() -> withConnection("query", connection -> executor.query(connection, sql, params, mapper,
                 0, StatementExecutor.NO_QUERY_TIMEOUT)));
     }
 
@@ -120,7 +123,7 @@ public final class PooledDatabase implements Database {
         if (TimeoutOverrides.statement() != null) {
             return inTransaction(transaction -> transaction.queryOne(sql, params, mapper));
         }
-        return tracked(() -> withConnection("queryOne", connection -> executor.queryOne(connection, sql, params,
+        return runTracked(() -> withConnection("queryOne", connection -> executor.queryOne(connection, sql, params,
                 mapper, StatementExecutor.NO_QUERY_TIMEOUT)));
     }
 
@@ -129,7 +132,7 @@ public final class PooledDatabase implements Database {
         if (TimeoutOverrides.statement() != null) {
             return inTransaction(transaction -> transaction.update(sql, params));
         }
-        return tracked(() -> withConnection("update", connection -> executor.update(connection, sql, params,
+        return runTracked(() -> withConnection("update", connection -> executor.update(connection, sql, params,
                 StatementExecutor.NO_QUERY_TIMEOUT)));
     }
 
@@ -143,12 +146,12 @@ public final class PooledDatabase implements Database {
 
     @Override
     public <T> T inTransaction(TxOptions options, Function<Transaction, T> work) {
-        return tracked(() -> transactions.run(options, work));
+        return runTracked(() -> transactions.run(options, work));
     }
 
     @Override
-    public DatabaseType type() {
-        return config.type();
+    public DatabaseType databaseType() {
+        return config.databaseType();
     }
 
     @Override
@@ -176,39 +179,35 @@ public final class PooledDatabase implements Database {
         }
         Duration timeout = config.pool().shutdownTimeout();
         try {
-            if (!inFlight.closeAndAwait(timeout)) {
-                LOG.warn("Closing database pool '{}' with {} statements or transactions still running after "
-                        + "waiting {} ms", config.poolName(), inFlight.active(), timeout.toMillis());
+            if (!inFlight.stopNewWorkAndWait(timeout)) {
+                log.warn("Closing database pool '{}' with {} statements or transactions still running after "
+                        + "waiting {} ms", config.poolName(), inFlight.runningCount(), timeout.toMillis());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            LOG.warn("Interrupted while waiting for running work on database pool '{}'; closing now",
+            log.warn("Interrupted while waiting for running work on database pool '{}'; closing now",
                     config.poolName());
         }
         if (ownsPool && hikari != null && !hikari.isClosed()) {
             hikari.close();
         }
-        LOG.info("Stopped database pool '{}'", config.poolName());
-    }
-
-    public DataSource dataSource() {
-        return dataSource;
+        log.info("Stopped database pool '{}'", config.poolName());
     }
 
     static boolean isLargeShare(int maxSize, int maxConnections) {
         return maxSize * 2L > maxConnections;
     }
 
-    private <T> T tracked(Supplier<T> work) {
-        inFlight.enter();
+    private <T> T runTracked(Supplier<T> work) {
+        inFlight.startWork();
         try {
             return work.get();
         } finally {
-            inFlight.exit();
+            inFlight.finishWork();
         }
     }
 
-    private <T> T withConnection(String operation, ConnectionWork<T> work) {
+    private <T> T withConnection(String operation, SqlFunction<Connection, T> work) {
         long start = System.nanoTime();
         try {
             T result = runOnConnection(work);
@@ -220,11 +219,11 @@ public final class PooledDatabase implements Database {
         }
     }
 
-    private <T> T runOnConnection(ConnectionWork<T> work) {
+    private <T> T runOnConnection(SqlFunction<Connection, T> work) {
         try {
             Connection connection = connections.acquire();
             try {
-                return work.run(connection);
+                return work.apply(connection);
             } finally {
                 connections.release(connection);
             }
@@ -235,21 +234,11 @@ public final class PooledDatabase implements Database {
         }
     }
 
-    private DatabaseException acquireTimeout(SQLTransientConnectionException cause) {
-        HikariPoolMXBean pool = hikari == null ? null : hikari.getHikariPoolMXBean();
-        String stats = pool == null ? "" : ", active=" + pool.getActiveConnections() + ", idle="
-                + pool.getIdleConnections() + ", waiting=" + pool.getThreadsAwaitingConnection();
-        long timeoutMillis = hikari != null ? hikari.getConnectionTimeout() : config.pool().acquireTimeout().toMillis();
-        return new AcquireTimeout("No connection available within " + timeoutMillis + " ms [pool="
-                + config.poolName() + stats
-                + "]. Increase pool.maxSize, or look for slow queries or connections that are not closed.",
-                null, cause);
-    }
 
     private void warnIfPoolIsLarge() {
         OptionalInt maxConnections = readMaxConnections();
         if (maxConnections.isPresent() && isLargeShare(config.pool().maxSize(), maxConnections.getAsInt())) {
-            LOG.warn("Database pool '{}' has maxSize {}, more than half of the database's max_connections ({}). "
+            log.warn("Database pool '{}' has maxSize {}, more than half of the database's max_connections ({}). "
                             + "A few application instances can exhaust the database's connections.",
                     config.poolName(), config.pool().maxSize(), maxConnections.getAsInt());
         }
@@ -261,7 +250,7 @@ public final class PooledDatabase implements Database {
              ResultSet result = statement.executeQuery(dialect.maxConnectionsQuery())) {
             return result.next() ? OptionalInt.of(Integer.parseInt(result.getString(1).trim())) : OptionalInt.empty();
         } catch (SQLException | NumberFormatException e) {
-            LOG.debug("Could not read max_connections for pool '{}'", config.poolName(), e);
+            log.debug("Could not read max_connections for pool '{}'", config.poolName(), e);
             return OptionalInt.empty();
         }
     }
@@ -290,46 +279,6 @@ public final class PooledDatabase implements Database {
             return dataSource.isWrapperFor(HikariDataSource.class) ? dataSource.unwrap(HikariDataSource.class) : null;
         } catch (SQLException e) {
             return null;
-        }
-    }
-
-    @FunctionalInterface
-    private interface ConnectionWork<T> {
-        T run(Connection connection) throws SQLException;
-    }
-
-    /**
-     * Turns the pool's "no connection available" error into {@link AcquireTimeout}, and passes on the
-     * driver's error when the pool couldn't create a connection at all.
-     */
-    private final class TranslatingProvider implements ConnectionProvider {
-
-        private final ConnectionProvider delegate;
-
-        private TranslatingProvider(ConnectionProvider delegate) {
-            this.delegate = delegate;
-        }
-
-        @Override
-        public Connection acquire() throws SQLException {
-            try {
-                return delegate.acquire();
-            } catch (SQLTransientConnectionException e) {
-                if (e.getCause() instanceof SQLException cause) {
-                    throw cause;
-                }
-                throw acquireTimeout(e);
-            }
-        }
-
-        @Override
-        public void release(Connection connection) throws SQLException {
-            delegate.release(connection);
-        }
-
-        @Override
-        public boolean isExternallyManaged(Connection connection) {
-            return delegate.isExternallyManaged(connection);
         }
     }
 }

@@ -9,7 +9,7 @@ import java.util.Optional;
  *
  * <p>The type is usually inferred from the JDBC URL with {@link #fromUrl(String)}; wrapper prefixes such
  * as {@code jdbc:aws-wrapper:postgresql:} are skipped. In configuration it is written as
- * {@link #configName()}, for example {@code type: postgres}.
+ * {@link #configName()}, for example {@code database-type: postgres}.
  */
 public enum DatabaseType {
 

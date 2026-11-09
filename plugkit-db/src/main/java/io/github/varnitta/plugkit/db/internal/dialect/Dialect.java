@@ -15,7 +15,7 @@ import java.util.Map;
  */
 public interface Dialect {
 
-    DatabaseType type();
+    DatabaseType databaseType();
 
     String driverClassName();
 

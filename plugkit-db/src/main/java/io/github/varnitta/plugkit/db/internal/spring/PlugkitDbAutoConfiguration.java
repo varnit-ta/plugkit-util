@@ -2,6 +2,7 @@ package io.github.varnitta.plugkit.db.internal.spring;
 
 import io.github.varnitta.plugkit.db.Database;
 import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
+import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorderFactory;
 import io.github.varnitta.plugkit.db.internal.metrics.MicrometerMetricsRecorder;
 import io.github.varnitta.plugkit.db.internal.pool.PooledDatabase;
 import io.github.varnitta.plugkit.db.spring.PlugkitDbProperties;
@@ -30,8 +31,8 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(PlugkitDbProperties.class)
 public class PlugkitDbAutoConfiguration {
 
-    static MetricsRecorder.Factory metricsOrNone(ObjectProvider<MetricsRecorder.Factory> metrics) {
-        return metrics.getIfAvailable(MetricsRecorder.Factory::none);
+    static MetricsRecorderFactory metricsOrNone(ObjectProvider<MetricsRecorderFactory> metrics) {
+        return metrics.getIfAvailable(MetricsRecorderFactory::none);
     }
 
     /**
@@ -44,7 +45,7 @@ public class PlugkitDbAutoConfiguration {
         @Bean(destroyMethod = "close")
         @ConditionalOnMissingBean(Database.class)
         PooledDatabase plugkitDatabase(PlugkitDbProperties properties,
-                                       ObjectProvider<MetricsRecorder.Factory> metrics) {
+                                       ObjectProvider<MetricsRecorderFactory> metrics) {
             return PooledDatabase.start(properties.toDatabaseConfig(), metricsOrNone(metrics),
                     SpringConnectionProvider::new);
         }
@@ -65,7 +66,7 @@ public class PlugkitDbAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        MetricsRecorder.Factory plugkitDbMetrics(ObjectProvider<MeterRegistry> registries) {
+        MetricsRecorderFactory plugkitDbMetrics(ObjectProvider<MeterRegistry> registries) {
             return poolName -> {
                 MeterRegistry registry = registries.getIfUnique();
                 return registry == null ? MetricsRecorder.none() : new MicrometerMetricsRecorder(registry, poolName);

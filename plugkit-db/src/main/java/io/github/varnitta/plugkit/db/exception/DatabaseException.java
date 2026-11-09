@@ -1,5 +1,6 @@
 package io.github.varnitta.plugkit.db.exception;
 
+import io.github.varnitta.plugkit.core.exception.PlugkitException;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
@@ -10,7 +11,7 @@ import org.jspecify.annotations.Nullable;
  * {@code true} only for {@link TransientFailure}s. The original {@link java.sql.SQLException} is kept as
  * the cause.
  */
-public abstract class DatabaseException extends RuntimeException {
+public abstract class DatabaseException extends PlugkitException {
 
     private final @Nullable String sqlState;
 
@@ -21,9 +22,5 @@ public abstract class DatabaseException extends RuntimeException {
 
     public Optional<String> sqlState() {
         return Optional.ofNullable(sqlState);
-    }
-
-    public boolean isRetryable() {
-        return false;
     }
 }

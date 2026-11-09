@@ -101,16 +101,11 @@ final class ResultSetRow implements Row {
         return value == null ? null : value.toInstant();
     }
 
-    private static <T> @Nullable T read(ColumnRead<T> read) {
+    private static <T> @Nullable T read(SqlSupplier<@Nullable T> read) {
         try {
-            return read.read();
+            return read.get();
         } catch (SQLException e) {
             throw new UncheckedSqlException(e);
         }
-    }
-
-    @FunctionalInterface
-    private interface ColumnRead<T> {
-        @Nullable T read() throws SQLException;
     }
 }

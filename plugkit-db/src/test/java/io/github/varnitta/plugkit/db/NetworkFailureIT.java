@@ -7,6 +7,7 @@ import eu.rekawek.toxiproxy.Proxy;
 import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.Toxic;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
+import io.github.varnitta.plugkit.core.Health;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.config.PoolConfig;
 import io.github.varnitta.plugkit.db.config.SessionConfig;

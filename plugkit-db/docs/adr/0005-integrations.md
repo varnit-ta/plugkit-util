@@ -31,8 +31,8 @@ per environment. Public factories choose the adapters; the engine only sees the 
 | Port (internal interface) | Question it answers | Adapters |
 |---|---|---|
 | `Dialect` | How does this database behave? | `PostgresDialect` ([ADR-0003 part 1](0003-multi-database-support.md#1-dialect-adapters-and-a-factory-for-multiple-databases)) |
-| `ConnectionProvider` | Where does a statement get its connection, and is that connection's transaction managed elsewhere? | `DataSourceConnectionProvider`, `SpringConnectionProvider`, plus the `TranslatingProvider` decorator inside `PooledDatabase` |
-| `MetricsRecorder` (+ `MetricsRecorder.Factory`) | Where do measurements go? | `MetricsRecorder.NoMetrics`, `MicrometerMetricsRecorder` |
+| `ConnectionProvider` | Where does a statement get its connection, and is that connection's transaction managed elsewhere? | `DataSourceConnectionProvider`, `SpringConnectionProvider`, plus the `TranslatingConnectionProvider` decorator inside `PooledDatabase` |
+| `MetricsRecorder` (+ `MetricsRecorderFactory`) | Where do measurements go? | `NoMetricsRecorder`, `MicrometerMetricsRecorder` |
 | `TimeoutOverrides` (per-thread hook) | Has the surrounding code asked for different timeouts? | Set by `TimeoutsInterceptor` (Spring `@Timeouts`) |
 
 Factories:
@@ -53,7 +53,7 @@ Rules:
 - **Only adapters import optional libraries.** `MicrometerMetricsRecorder` and `MeteredDatabases` are
   the only classes that import Micrometer outside `internal.spring`, so a plain application never loads
   them.
-- **Adapters are passed in, not looked up.** `PooledDatabase` receives a `MetricsRecorder.Factory` and a
+- **Adapters are passed in, not looked up.** `PooledDatabase` receives a `MetricsRecorderFactory` and a
   `Function<DataSource, ConnectionProvider>`. There is no global registry or service discovery.
 - **The null object is the default.** `MetricsRecorder.none()` discards events, so the engine never
   checks whether metrics are enabled.
@@ -88,7 +88,7 @@ classDiagram
     }
     class DataSourceConnectionProvider
     class SpringConnectionProvider
-    class TranslatingProvider {
+    class TranslatingConnectionProvider {
         <<decorator>>
     }
     class MetricsRecorder {
@@ -99,26 +99,26 @@ classDiagram
         +configurePool(HikariConfig)
         +none()$
     }
-    class MetricsRecorderFactory["MetricsRecorder.Factory"] {
+    class MetricsRecorderFactory {
         <<interface>>
         +forPool(poolName) MetricsRecorder
         +none()$
     }
-    class NoMetrics {
+    class NoMetricsRecorder {
         <<enum, null object>>
     }
     class MicrometerMetricsRecorder
-    Databases ..> PooledDatabase : NoMetrics + DataSourceConnectionProvider
+    Databases ..> PooledDatabase : NoMetricsRecorder + DataSourceConnectionProvider
     MeteredDatabases ..> PooledDatabase : Micrometer + DataSourceConnectionProvider
     PlugkitDbAutoConfiguration ..> PooledDatabase : Micrometer or none + SpringConnectionProvider
     ConnectionProvider <|.. DataSourceConnectionProvider
     ConnectionProvider <|.. SpringConnectionProvider
-    ConnectionProvider <|.. TranslatingProvider
-    TranslatingProvider o-- ConnectionProvider : wraps
-    MetricsRecorder <|.. NoMetrics
+    ConnectionProvider <|.. TranslatingConnectionProvider
+    TranslatingConnectionProvider o-- ConnectionProvider : wraps
+    MetricsRecorder <|.. NoMetricsRecorder
     MetricsRecorder <|.. MicrometerMetricsRecorder
     MetricsRecorderFactory ..> MetricsRecorder : creates per pool
-    PooledDatabase o-- TranslatingProvider
+    PooledDatabase o-- TranslatingConnectionProvider
     PooledDatabase o-- MetricsRecorder
 ```
 
@@ -128,7 +128,7 @@ classDiagram
 sequenceDiagram
     participant App
     participant PD as PooledDatabase
-    participant TP as TranslatingProvider
+    participant TP as TranslatingConnectionProvider
     participant CP as ConnectionProvider adapter
     participant SE as StatementExecutor
     participant D as Dialect
@@ -154,7 +154,7 @@ sequenceDiagram
 |---|---|---|---|
 | `DataSourceConnectionProvider` | `dataSource.getConnection()` | `connection.close()` | always `false` |
 | `SpringConnectionProvider` | `DataSourceUtils.getConnection(dataSource)`; unwraps Spring's `CannotGetJdbcConnectionException` | `DataSourceUtils.releaseConnection` (no-op for a transaction-bound connection) | `true` when a Spring transaction is active and the connection belongs to it |
-| `TranslatingProvider` (decorator) | delegates; turns Hikari's "no connection available" into `AcquireTimeout` with pool stats, or passes on the driver error if no connection could be created | delegates | delegates |
+| `TranslatingConnectionProvider` (decorator) | delegates; turns Hikari's "no connection available" into `AcquireTimeout` with pool stats, or passes on the driver error if no connection could be created | delegates | delegates |
 
 When `isExternallyManaged` is `true`, `TransactionRunner` joins the outer transaction instead of
 starting its own ([ADR-0004 part 2](0004-running-sql.md#2-transactions-with-deadlines-opt-in-retry-and-safe-commits)).
@@ -163,7 +163,7 @@ starting its own ([ADR-0004 part 2](0004-running-sql.md#2-transactions-with-dead
 
 | Adapter | Behaviour |
 |---|---|
-| `NoMetrics` | Discards every event; the default for `Databases.create` |
+| `NoMetricsRecorder` | Discards every event; the default for `Databases.create` |
 | `MicrometerMetricsRecorder` | Records timers and counters and registers Hikari's Micrometer tracker ([part 2](#2-logging-metrics-and-health)) |
 
 #### Adding an integration
@@ -217,7 +217,7 @@ flowchart LR
     CT[ConnectionTransaction<br/>statements in a transaction] -->|statement| MR
     TR[TransactionRunner] -->|transaction, retry| MR
     HPF[HikariPoolFactory] -->|configurePool| MR
-    MR --> NONE[NoMetrics: discard]
+    MR --> NONE[NoMetricsRecorder: discard]
     MR --> MIC[MicrometerMetricsRecorder]
     MIC --> REG[(MeterRegistry)]
 ```
@@ -244,7 +244,7 @@ Database db = MeteredDatabases.create(config, meterRegistry);
 ```mermaid
 classDiagram
     class Health {
-        <<record>>
+        <<record, plugkit-core>>
         +boolean healthy
         +Duration responseTime
         +String problem
@@ -303,7 +303,7 @@ flowchart TD
         A1 --> B1 --> A2 --> A3
     end
     A1 -->|plugkit.db.url set| OWN[Database bean = PooledDatabase.start<br/>DataSource bean = its Hikari pool]
-    A1 -->|MeterRegistry class present| MET[MetricsRecorder.Factory bean]
+    A1 -->|MeterRegistry class present| MET[MetricsRecorderFactory bean]
     B1 -->|only if no DataSource yet| BOOTDS[Boot builds DataSource<br/>from spring.datasource.*]
     A2 -->|no Database bean, one DataSource| WRAP[Database bean = PooledDatabase.wrap]
     A3 -->|Database bean exists| SUP[RetryOnTransient and Timeouts advisors,<br/>health indicator, auto-proxy creator]
@@ -315,7 +315,7 @@ flowchart TD
 | `RetryOnTransient`, `Timeouts` | `spring` | Public annotations |
 | `PlugkitDbAutoConfiguration` | `internal.spring` | Own-pool mode and the metrics factory bean |
 | `PlugkitDbDataSourceAutoConfiguration` | `internal.spring` | Wrap mode |
-| `PlugkitDbSupportAutoConfiguration` | `internal.spring` | Advisors, health indicator, `ProxyCreatorRegistrar` |
+| `PlugkitDbSupportAutoConfiguration` | `internal.spring` | Advisors, health indicator; imports `ProxyCreatorRegistrar` |
 | `SpringConnectionProvider` | `internal.spring` | Connections through `DataSourceUtils`; detects Spring-managed transactions |
 | `RetryOnTransientInterceptor`, `TimeoutsInterceptor` | `internal.spring` | Annotation behaviour |
 | `AnnotationLookup` | `internal.spring` | Finds an annotation on the method or its class; caches per method |

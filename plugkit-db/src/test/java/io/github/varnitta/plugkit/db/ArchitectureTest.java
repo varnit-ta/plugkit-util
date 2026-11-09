@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 class ArchitectureTest {
 
     private static final String DB = "io.github.varnitta.plugkit.db";
+    private static final String CORE = "io.github.varnitta.plugkit.core";
     private static final String[] PUBLIC_PACKAGES = {
             DB, DB + ".config", DB + ".exception", DB + ".metrics", DB + ".spring", DB + ".sql", DB + ".tx"};
 
@@ -60,9 +61,10 @@ class ArchitectureTest {
     }
 
     @Test
-    void exceptionsDependOnNothingElseInTheLibrary() {
+    void exceptionsDependOnlyOnCoreExceptions() {
         classes().that().resideInAPackage(DB + ".exception..")
-                .should().onlyDependOnClassesThat().resideInAnyPackage(DB + ".exception..", "java..", "org.jspecify..")
+                .should().onlyDependOnClassesThat().resideInAnyPackage(DB + ".exception..", CORE + ".exception..",
+                        "java..", "org.jspecify..")
                 .check(MAIN);
     }
 
@@ -100,7 +102,8 @@ class ArchitectureTest {
             @Override
             public void check(JavaMethod method, ConditionEvents events) {
                 Stream.concat(Stream.of(method.getRawReturnType()), method.getRawParameterTypes().stream())
-                        .filter(type -> type.getPackageName().startsWith(DB + ".internal"))
+                        .filter(type -> type.getPackageName().startsWith(DB + ".internal")
+                                || type.getPackageName().startsWith(CORE + ".internal"))
                         .forEach(type -> events.add(SimpleConditionEvent.violated(method,
                                 method.getFullName() + " exposes internal type " + type.getName())));
             }

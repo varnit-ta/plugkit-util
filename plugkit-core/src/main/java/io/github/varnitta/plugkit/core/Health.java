@@ -1,12 +1,14 @@
-package io.github.varnitta.plugkit.db;
+package io.github.varnitta.plugkit.core;
 
 import java.time.Duration;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Result of a {@link Database#health()} check.
+ * Result of a health check on a resource, such as {@code Database.health()} in plugkit-db.
  *
- * @param healthy      whether a connection could be borrowed and answered in time
+ * <p>A health check never throws; a failure is reported as {@code healthy = false} with the reason.
+ *
+ * @param healthy      whether the resource answered in time
  * @param responseTime how long the check took
  * @param problem      why the check failed, or {@code null} when healthy
  */

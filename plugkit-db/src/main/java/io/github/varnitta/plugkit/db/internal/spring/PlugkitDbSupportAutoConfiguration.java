@@ -6,12 +6,10 @@ import io.github.varnitta.plugkit.db.spring.Timeouts;
 import java.lang.annotation.Annotation;
 import org.springframework.aop.Advisor;
 import org.springframework.aop.Pointcut;
-import org.springframework.aop.config.AopConfigUtils;
 import org.springframework.aop.support.ComposablePointcut;
 import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.aop.support.annotation.AnnotationMatchingPointcut;
 import org.springframework.beans.factory.config.BeanDefinition;
-import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -20,10 +18,8 @@ import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
 import org.springframework.context.annotation.Role;
 import org.springframework.core.Ordered;
-import org.springframework.core.type.AnnotationMetadata;
 
 /**
  * Extras that need a {@link Database} bean: the {@link RetryOnTransient} and {@link Timeouts}
@@ -34,7 +30,7 @@ import org.springframework.core.type.AnnotationMetadata;
  */
 @AutoConfiguration(after = {PlugkitDbAutoConfiguration.class, PlugkitDbDataSourceAutoConfiguration.class})
 @ConditionalOnBean(Database.class)
-@Import(PlugkitDbSupportAutoConfiguration.ProxyCreatorRegistrar.class)
+@Import(ProxyCreatorRegistrar.class)
 public class PlugkitDbSupportAutoConfiguration {
 
     static final int RETRY_ORDER = Ordered.LOWEST_PRECEDENCE - 100;
@@ -74,19 +70,6 @@ public class PlugkitDbSupportAutoConfiguration {
         @ConditionalOnMissingBean(name = "plugkitDbHealthIndicator")
         HealthIndicator plugkitDbHealthIndicator(Database database) {
             return new DatabaseHealthIndicator(database);
-        }
-    }
-
-    /**
-     * Makes sure an auto-proxy creator exists, using class proxying, so the annotation advisors apply
-     * to classes without interfaces.
-     */
-    static class ProxyCreatorRegistrar implements ImportBeanDefinitionRegistrar {
-
-        @Override
-        public void registerBeanDefinitions(AnnotationMetadata metadata, BeanDefinitionRegistry registry) {
-            AopConfigUtils.registerAutoProxyCreatorIfNecessary(registry);
-            AopConfigUtils.forceAutoProxyCreatorToUseClassProxying(registry);
         }
     }
 }

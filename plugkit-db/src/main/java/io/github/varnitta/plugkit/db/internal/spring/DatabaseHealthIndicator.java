@@ -18,9 +18,9 @@ final class DatabaseHealthIndicator implements HealthIndicator {
 
     @Override
     public Health health() {
-        io.github.varnitta.plugkit.db.Health result = database.health();
+        io.github.varnitta.plugkit.core.Health result = database.health();
         Health.Builder builder = result.healthy() ? Health.up() : Health.down();
-        builder.withDetail("database", database.type().configName())
+        builder.withDetail("database", database.databaseType().configName())
                 .withDetail("pool", database.poolName())
                 .withDetail("responseTimeMs", result.responseTime().toMillis());
         if (result.problem() != null) {

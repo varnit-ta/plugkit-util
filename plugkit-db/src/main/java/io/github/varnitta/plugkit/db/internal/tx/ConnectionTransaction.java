@@ -1,13 +1,14 @@
 package io.github.varnitta.plugkit.db.internal.tx;
 
+import io.github.varnitta.plugkit.core.internal.validation.ConfigValidator;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
 import io.github.varnitta.plugkit.db.exception.StatementTimeout;
 import io.github.varnitta.plugkit.db.exception.TransactionTimeout;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
 import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
+import io.github.varnitta.plugkit.db.internal.statement.SqlFunction;
 import io.github.varnitta.plugkit.db.internal.statement.StatementExecutor;
 import io.github.varnitta.plugkit.db.internal.statement.UncheckedSqlException;
-import io.github.varnitta.plugkit.db.internal.validation.ConfigValidator;
 import io.github.varnitta.plugkit.db.sql.Params;
 import io.github.varnitta.plugkit.db.sql.RowMapper;
 import io.github.varnitta.plugkit.db.tx.Transaction;
@@ -82,7 +83,7 @@ final class ConnectionTransaction implements Transaction {
                 + ConfigValidator.formatDuration(timeout) + " [pool=" + poolName + "]", null, cause);
     }
 
-    private <T> T run(String operation, StatementWork<T> work) {
+    private <T> T run(String operation, SqlFunction<Integer, T> work) {
         long start = System.nanoTime();
         try {
             T result = runChecked(work);
@@ -94,7 +95,7 @@ final class ConnectionTransaction implements Transaction {
         }
     }
 
-    private <T> T runChecked(StatementWork<T> work) {
+    private <T> T runChecked(SqlFunction<Integer, T> work) {
         if (!active) {
             throw new IllegalStateException("Transaction is no longer active; use it only inside its callback");
         }
@@ -105,7 +106,7 @@ final class ConnectionTransaction implements Transaction {
         long limitMillis = Math.min(Duration.ofNanos(remainingNanos).toMillis(), statementTimeout.toMillis());
         int queryTimeoutSeconds = (int) Math.max(1, Math.ceilDiv(limitMillis, 1000));
         try {
-            return work.run(queryTimeoutSeconds);
+            return work.apply(queryTimeoutSeconds);
         } catch (SQLException e) {
             throw translate(e);
         } catch (UncheckedSqlException e) {
@@ -116,10 +117,5 @@ final class ConnectionTransaction implements Transaction {
     private DatabaseException translate(SQLException exception) {
         DatabaseException translated = dialect.translate(exception, poolName);
         return translated instanceof StatementTimeout && deadlinePassed() ? timeoutFailure(exception) : translated;
-    }
-
-    @FunctionalInterface
-    private interface StatementWork<T> {
-        T run(int queryTimeoutSeconds) throws SQLException;
     }
 }

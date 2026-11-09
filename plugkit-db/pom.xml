@@ -17,6 +17,10 @@
 
   <dependencies>
     <dependency>
+      <groupId>io.github.varnit-ta</groupId>
+      <artifactId>plugkit-core</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
       <scope>provided</scope>

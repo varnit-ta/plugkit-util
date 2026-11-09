@@ -209,12 +209,12 @@ classDiagram
         <<internal>>
     }
     class Backoff {
-        <<internal>>
+        <<plugkit-core>>
         +delay(retry)$ Duration
     }
     class TimeoutOverrides {
         <<internal, per thread>>
-        +apply(statement, transaction)$ Scope
+        +apply(statement, transaction)$ TimeoutOverrideScope
     }
     Transaction <|.. ConnectionTransaction
     TransactionRunner ..> ConnectionTransaction : creates per attempt

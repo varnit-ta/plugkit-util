@@ -51,7 +51,7 @@ class MeteredDatabasesIT {
             SimpleMeterRegistry registry = new SimpleMeterRegistry();
             Database db = MeteredDatabases.create(pool, registry);
 
-            assertThat(db.type()).isEqualTo(DatabaseType.POSTGRES);
+            assertThat(db.databaseType()).isEqualTo(DatabaseType.POSTGRES);
             assertThat(db.poolName()).isEqualTo("app-pool");
             assertThat(db.query("select 1 as one", Params.empty(), row -> row.getInt("one"))).containsExactly(1);
             db.close();

@@ -16,8 +16,8 @@ public final class Dialects {
     private Dialects() {
     }
 
-    public static Dialect forType(DatabaseType type) {
-        return switch (type) {
+    public static Dialect forType(DatabaseType databaseType) {
+        return switch (databaseType) {
             case POSTGRES -> POSTGRES;
         };
     }

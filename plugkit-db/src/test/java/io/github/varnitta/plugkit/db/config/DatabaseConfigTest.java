@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.varnitta.plugkit.db.DatabaseType;
-import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
@@ -50,12 +50,12 @@ class DatabaseConfigTest {
         assertThat(configProblemsThrownBy(() -> new DatabaseConfig(DatabaseType.POSTGRES, "jdbc:mysql://localhost/app", null,
                 null, "p", PoolConfig.defaults(), SessionConfig.defaults(), TxConfig.defaults(),
                 Duration.ofSeconds(1), Map.of())))
-                .containsExactly("type is 'postgres' but url does not start with jdbc:postgresql:");
+                .containsExactly("databaseType is 'postgres' but url does not start with jdbc:postgresql:");
     }
 
     @Test
     void typeIsInferredFromUrl() {
-        assertThat(DatabaseConfig.builder().url(URL).build().type()).isEqualTo(DatabaseType.POSTGRES);
+        assertThat(DatabaseConfig.builder().url(URL).build().databaseType()).isEqualTo(DatabaseType.POSTGRES);
     }
 
     @Test
@@ -64,22 +64,22 @@ class DatabaseConfigTest {
                 .url("jdbc:aws-wrapper:postgresql://orders.cluster-abc.us-east-1.rds.amazonaws.com:5432/app")
                 .build();
 
-        assertThat(config.type()).isEqualTo(DatabaseType.POSTGRES);
+        assertThat(config.databaseType()).isEqualTo(DatabaseType.POSTGRES);
     }
 
     @Test
     void explicitTypeMatchingUrlIsAccepted() {
-        assertThat(DatabaseConfig.builder().type(DatabaseType.POSTGRES).url(URL).build().type())
+        assertThat(DatabaseConfig.builder().databaseType(DatabaseType.POSTGRES).url(URL).build().databaseType())
                 .isEqualTo(DatabaseType.POSTGRES);
     }
 
     @Test
     void explicitTypeMustMatchUrl() {
         assertThat(configProblemsThrownBy(() -> DatabaseConfig.builder()
-                .type(DatabaseType.POSTGRES)
+                .databaseType(DatabaseType.POSTGRES)
                 .url("jdbc:mysql://localhost:3306/app")
                 .build()))
-                .containsExactly("type is 'postgres' but url does not start with jdbc:postgresql:");
+                .containsExactly("databaseType is 'postgres' but url does not start with jdbc:postgresql:");
     }
 
     @Test
@@ -145,7 +145,7 @@ class DatabaseConfigTest {
     void errorMessageListsEachProblemOnItsOwnLine() {
         assertThatThrownBy(() -> DatabaseConfig.builder().poolName("").build())
                 .hasMessage(String.join(System.lineSeparator(),
-                        "Invalid plugkit-db configuration:",
+                        "Invalid plugkit configuration:",
                         "  - url is required",
                         "  - poolName must not be blank"));
     }

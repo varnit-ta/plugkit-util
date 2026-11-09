@@ -15,7 +15,7 @@ import io.github.varnitta.plugkit.db.exception.StatementTimeout;
 import io.github.varnitta.plugkit.db.exception.TransactionTimeout;
 import io.github.varnitta.plugkit.db.exception.UniqueViolation;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
-import io.github.varnitta.plugkit.db.internal.validation.ConfigValidator;
+import io.github.varnitta.plugkit.core.internal.validation.ConfigValidator;
 import java.sql.BatchUpdateException;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -42,7 +42,7 @@ public final class PostgresDialect implements Dialect {
     private static final List<String> DERIVED_PROPERTIES = List.of("connectTimeout", "socketTimeout");
 
     @Override
-    public DatabaseType type() {
+    public DatabaseType databaseType() {
         return DatabaseType.POSTGRES;
     }
 

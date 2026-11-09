@@ -2,6 +2,7 @@ package io.github.varnitta.plugkit.db.internal.spring;
 
 import io.github.varnitta.plugkit.db.Database;
 import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
+import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorderFactory;
 import io.github.varnitta.plugkit.db.internal.pool.PooledDatabase;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
@@ -27,7 +28,7 @@ import org.springframework.context.annotation.Bean;
 public class PlugkitDbDataSourceAutoConfiguration {
 
     @Bean(destroyMethod = "close")
-    PooledDatabase plugkitDatabase(DataSource dataSource, ObjectProvider<MetricsRecorder.Factory> metrics) {
+    PooledDatabase plugkitDatabase(DataSource dataSource, ObjectProvider<MetricsRecorderFactory> metrics) {
         return PooledDatabase.wrap(dataSource, PlugkitDbAutoConfiguration.metricsOrNone(metrics),
                 SpringConnectionProvider::new);
     }

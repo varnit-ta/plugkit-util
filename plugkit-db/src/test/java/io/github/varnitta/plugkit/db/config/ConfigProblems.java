@@ -3,7 +3,7 @@ package io.github.varnitta.plugkit.db.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
-import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import java.util.List;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 

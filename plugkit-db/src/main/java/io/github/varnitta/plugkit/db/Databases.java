@@ -3,6 +3,7 @@ package io.github.varnitta.plugkit.db;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.internal.connection.DataSourceConnectionProvider;
 import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorder;
+import io.github.varnitta.plugkit.db.internal.metrics.MetricsRecorderFactory;
 import io.github.varnitta.plugkit.db.internal.pool.PooledDatabase;
 import javax.sql.DataSource;
 
@@ -30,7 +31,7 @@ public final class Databases {
      * pool.
      */
     public static Database create(DatabaseConfig config) {
-        return PooledDatabase.start(config, MetricsRecorder.Factory.none(), DataSourceConnectionProvider::new);
+        return PooledDatabase.start(config, MetricsRecorderFactory.none(), DataSourceConnectionProvider::new);
     }
 
     /**
@@ -39,6 +40,6 @@ public final class Databases {
      * database leaves the pool open.
      */
     public static Database create(DataSource dataSource) {
-        return PooledDatabase.wrap(dataSource, MetricsRecorder.Factory.none(), DataSourceConnectionProvider::new);
+        return PooledDatabase.wrap(dataSource, MetricsRecorderFactory.none(), DataSourceConnectionProvider::new);
     }
 }

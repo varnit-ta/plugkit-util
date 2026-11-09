@@ -1,6 +1,6 @@
 package io.github.varnitta.plugkit.db.internal.pool;
 
-import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
 import java.util.List;
 
@@ -16,7 +16,7 @@ final class DriverCheck {
         try {
             Class.forName(dialect.driverClassName(), false, classLoader());
         } catch (ClassNotFoundException e) {
-            throw new InvalidConfigException(List.of("type '" + dialect.type().configName()
+            throw new InvalidConfigException(List.of("database type '" + dialect.databaseType().configName()
                     + "' needs the JDBC driver " + dialect.driverClassName()
                     + ": add the dependency " + dialect.driverArtifact()));
         }

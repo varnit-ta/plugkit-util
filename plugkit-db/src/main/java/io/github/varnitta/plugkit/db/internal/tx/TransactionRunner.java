@@ -1,5 +1,6 @@
 package io.github.varnitta.plugkit.db.internal.tx;
 
+import io.github.varnitta.plugkit.core.internal.retry.Backoff;
 import io.github.varnitta.plugkit.db.config.DatabaseConfig;
 import io.github.varnitta.plugkit.db.exception.CommitOutcomeUnknown;
 import io.github.varnitta.plugkit.db.exception.ConnectionLost;
@@ -15,9 +16,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.function.Function;
+import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Runs a callback inside a database transaction: begin, run, commit or roll back, and retry.
@@ -31,9 +31,9 @@ import org.slf4j.LoggerFactory;
  * for example by Spring's {@code @Transactional}, the callback joins that transaction: no begin, commit,
  * rollback or retry, and isolation and read-only settings are left to the outer transaction.
  */
+@Slf4j
 public final class TransactionRunner {
 
-    private static final Logger LOG = LoggerFactory.getLogger(TransactionRunner.class);
     private static final Duration NETWORK_TIMEOUT_MARGIN = Duration.ofSeconds(5);
 
     private final ConnectionProvider connections;
@@ -66,7 +66,7 @@ public final class TransactionRunner {
                     throw e;
                 }
                 metrics.retry(failure);
-                LOG.info("Retrying transaction on pool '{}' after {} (attempt {} of {})", config.poolName(),
+                log.info("Retrying transaction on pool '{}' after {} (attempt {} of {})", config.poolName(),
                         failure.getClass().getSimpleName(), attempt + 1, options.maxAttempts());
                 pause(Backoff.delay(attempt), failure);
             }

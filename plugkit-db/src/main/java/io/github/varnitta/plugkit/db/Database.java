@@ -1,5 +1,6 @@
 package io.github.varnitta.plugkit.db;
 
+import io.github.varnitta.plugkit.core.Health;
 import io.github.varnitta.plugkit.db.sql.SqlOperations;
 import io.github.varnitta.plugkit.db.tx.Transaction;
 import io.github.varnitta.plugkit.db.tx.TxOptions;
@@ -35,7 +36,7 @@ public interface Database extends SqlOperations, AutoCloseable {
         return inTransaction(TxOptions.defaults(), work);
     }
 
-    DatabaseType type();
+    DatabaseType databaseType();
 
     String poolName();
 

@@ -42,7 +42,7 @@ Use the **adapter pattern** with a **factory**:
 - **`Dialects` is the factory.** `Dialects.forType(DatabaseType)` returns the adapter with an
   exhaustive `switch`. Adding a `DatabaseType` constant without registering a dialect doesn't compile.
 - **`DatabaseType` names the supported databases.** It is public, because users may set it
-  (`type: postgres`), and it is inferred from the URL when not set.
+  (`database-type: postgres`), and it is inferred from the URL when not set.
 - **Dialects are bundled and stateless.** There is no `ServiceLoader` discovery; one shared instance
   per database serves every pool.
 - **Dialects need no driver classes for their core job.** Error codes and session settings are strings.
@@ -63,7 +63,7 @@ classDiagram
     }
     class Dialect {
         <<interface>>
-        +type() DatabaseType
+        +databaseType() DatabaseType
         +driverClassName() String
         +driverArtifact() String
         +connectionProperties(session, userProperties) Map
@@ -104,7 +104,7 @@ classDiagram
 
 | Method | Question | Called by | When |
 |---|---|---|---|
-| `type()` | Which `DatabaseType` is this? | `DriverCheck` (messages) | Startup |
+| `databaseType()` | Which `DatabaseType` is this? | `DriverCheck` (messages) | Startup |
 | `driverClassName()` / `driverArtifact()` | Which driver must be present, and which dependency provides it? | `DriverCheck` | Startup |
 | `connectionProperties(session, user)` | Which driver properties apply the session timeouts, derived timeouts and safe defaults, merged with the user's? Which user keys are forbidden? | `HikariPoolFactory` | Startup |
 | `maxConnectionsQuery()` | How is the server's connection limit read? | `PooledDatabase` | Startup check |
@@ -131,7 +131,7 @@ sequenceDiagram
 
 - Wrapper prefixes are skipped: `jdbc:aws-wrapper:postgresql:` and `jdbc:otel:postgresql:` both resolve
   to `postgres`.
-- If `type` is set it must match the URL: `type is 'postgres' but url does not start with jdbc:postgresql:`.
+- If `databaseType` is set it must match the URL: `databaseType is 'postgres' but url does not start with jdbc:postgresql:`.
 - An unsupported URL fails: `url is not for a supported database; supported: postgres (jdbc:postgresql:)`.
 - A wrapped `DataSource` is detected from its connection metadata URL the same way.
 
@@ -169,7 +169,7 @@ An illustrative skeleton (not part of the code base):
 ```java
 public final class MySqlDialect implements Dialect {
 
-    public DatabaseType type() { return DatabaseType.MYSQL; }
+    public DatabaseType databaseType() { return DatabaseType.MYSQL; }
 
     public String driverClassName() { return "com.mysql.cj.jdbc.Driver"; }
 
@@ -233,14 +233,17 @@ values, which must not reach logs.
   hierarchy can't be extended outside the library.
 - Messages are the server's primary error text plus `[pool=…, SQLState=…]`. They never include the
   server's `DETAIL` or bound values.
-- Configuration problems are a separate `InvalidConfigException`, thrown at startup.
+- Configuration problems are a separate `InvalidConfigException` from plugkit-core, thrown at startup.
+- `DatabaseException` and `InvalidConfigException` extend plugkit-core's `PlugkitException`
+  ([ADR-0001 part 5](0001-architecture-and-structure.md#5-shared-plugkit-core-module)).
 
 ### Structure
 
 ```mermaid
 classDiagram
-    RuntimeException <|-- DatabaseException
-    RuntimeException <|-- InvalidConfigException
+    RuntimeException <|-- PlugkitException
+    PlugkitException <|-- DatabaseException
+    PlugkitException <|-- InvalidConfigException
     DatabaseException <|-- ConstraintViolation
     DatabaseException <|-- TransientFailure
     DatabaseException <|-- TimeoutFailure
@@ -302,7 +305,7 @@ classDiagram
 | Statements in a transaction | `ConnectionTransaction`; a cancellation after the deadline becomes `TransactionTimeout` |
 | Commit | `TransactionRunner.commit`; `ConnectionLost` becomes `CommitOutcomeUnknown` |
 | Column reads in a `RowMapper` | `ResultSetRow` wraps `SQLException` in `UncheckedSqlException`; the engine unwraps and translates it ([ADR-0004 part 1](0004-running-sql.md#1-plain-sql-with-named-parameters-and-row-mappers)) |
-| Pool exhaustion | `TranslatingProvider` → `AcquireTimeout` with active, idle and waiting counts |
+| Pool exhaustion | `TranslatingConnectionProvider` → `AcquireTimeout` with active, idle and waiting counts |
 | Health check | `PooledDatabase.health()` puts the translated message in `Health.problem` |
 
 Example messages:

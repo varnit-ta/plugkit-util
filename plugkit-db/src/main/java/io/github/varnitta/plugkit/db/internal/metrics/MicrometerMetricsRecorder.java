@@ -31,7 +31,7 @@ public final class MicrometerMetricsRecorder implements MetricsRecorder {
         this.poolName = poolName;
     }
 
-    public static Factory factory(MeterRegistry registry) {
+    public static MetricsRecorderFactory factory(MeterRegistry registry) {
         return poolName -> new MicrometerMetricsRecorder(registry, poolName);
     }
 

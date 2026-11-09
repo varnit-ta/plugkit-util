@@ -32,7 +32,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * its own pool and exposes it as the application's {@code DataSource}; without it, plugkit-db uses the
  * application's existing {@code DataSource}.
  *
- * @param type               the database type; inferred from {@code url} when not set
+ * @param databaseType       which database the URL points to; inferred from {@code url} when not set
  * @param url                the JDBC URL
  * @param user               the database user
  * @param password           the database password
@@ -45,7 +45,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties("plugkit.db")
 public record PlugkitDbProperties(
-        @Nullable DatabaseType type,
+        @Nullable DatabaseType databaseType,
         @Nullable String url,
         @Nullable String user,
         @Nullable String password,
@@ -102,7 +102,7 @@ public record PlugkitDbProperties(
 
     public DatabaseConfig toDatabaseConfig() {
         return DatabaseConfig.builder()
-                .type(type)
+                .databaseType(databaseType)
                 .url(url)
                 .user(user)
                 .password(password)
@@ -130,7 +130,7 @@ public record PlugkitDbProperties(
 
     @Override
     public String toString() {
-        return "PlugkitDbProperties[type=" + type + ", url=" + url + ", user=" + user
+        return "PlugkitDbProperties[databaseType=" + databaseType + ", url=" + url + ", user=" + user
                 + ", password=" + (password == null ? null : "****") + ", poolName=" + poolName
                 + ", pool=" + pool + ", session=" + session + ", tx=" + tx
                 + ", slowQueryThreshold=" + slowQueryThreshold

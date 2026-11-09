@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.varnitta.plugkit.db.DatabaseType;
 import io.github.varnitta.plugkit.db.config.SessionConfig;
 import io.github.varnitta.plugkit.db.exception.DatabaseException;
-import io.github.varnitta.plugkit.db.exception.InvalidConfigException;
+import io.github.varnitta.plugkit.core.exception.InvalidConfigException;
 import io.github.varnitta.plugkit.db.internal.dialect.Dialect;
 import io.github.varnitta.plugkit.db.internal.dialect.postgres.PostgresDialect;
 import java.sql.SQLException;
@@ -25,14 +25,14 @@ class DriverCheckTest {
     void failsWithTheDependencyToAdd() {
         assertThatThrownBy(() -> DriverCheck.requireDriver(new MissingDriverDialect()))
                 .isInstanceOf(InvalidConfigException.class)
-                .hasMessageContaining("type 'postgres' needs the JDBC driver com.example.MissingDriver: "
+                .hasMessageContaining("database type 'postgres' needs the JDBC driver com.example.MissingDriver: "
                         + "add the dependency com.example:missing-driver");
     }
 
     private static final class MissingDriverDialect implements Dialect {
 
         @Override
-        public DatabaseType type() {
+        public DatabaseType databaseType() {
             return DatabaseType.POSTGRES;
         }
 

@@ -9,6 +9,7 @@ How plugkit-db is packaged and organised, and how that structure is kept.
 2. [One artifact with optional integrations](#2-one-artifact-with-optional-integrations)
 3. [Feature packages with a private `internal` tree](#3-feature-packages-with-a-private-internal-tree)
 4. [Testing strategy](#4-testing-strategy)
+5. [Shared `plugkit-core` module](#5-shared-plugkit-core-module)
 
 ## 1. Record architecture decisions
 
@@ -79,10 +80,11 @@ every dialect, Micrometer support and Spring Boot support.
 
 | Dependency | Scope | Why |
 |---|---|---|
+| `plugkit-core` | compile | Shared building blocks: validation, backoff, shutdown tracking, redaction, `Health`, base exceptions ([part 5](#5-shared-plugkit-core-module)) |
 | HikariCP, SLF4J API | compile | Connection pool and logging API |
 | JSpecify | compile | Nullness annotations on the public API |
-| Lombok | provided | Compile-time builders; not on the user's classpath |
-| PostgreSQL JDBC driver | optional | Compiled against to read constraint names; touched only when `type` is `postgres` |
+| Lombok | provided | Compile-time builders and `@Slf4j` loggers; not on the user's classpath |
+| PostgreSQL JDBC driver | optional | Compiled against to read constraint names; touched only when `databaseType` is `postgres` |
 | Micrometer | optional | Used only by `MeteredDatabases` and the Spring integration |
 | `spring-boot-autoconfigure`, `spring-boot-health`, `spring-jdbc` | optional | Auto-configuration activates only when present |
 | JDBC driver for the user's database | not included | The application adds it |
@@ -115,11 +117,13 @@ flowchart LR
     subgraph app[Application classpath]
         PDB[plugkit-db.jar]
         DRV[JDBC driver<br/>added by the app]
+        CORE[plugkit-core]
         HK[HikariCP]
         SLF[SLF4J API]
         MM[Micrometer<br/>optional]
         SB[Spring Boot<br/>optional]
     end
+    PDB --> CORE
     PDB --> HK
     PDB --> SLF
     PDB -. only when present .-> MM
@@ -127,7 +131,7 @@ flowchart LR
     PDB --> DRV
 ```
 
-Published artifacts per release: `plugkit-db.jar`, `plugkit-db-sources.jar` and `plugkit-db-javadoc.jar`.
+Published artifacts per release: `plugkit-db` and `plugkit-core`, each as main, `-sources` and `-javadoc` jars.
 The parent POM enforces Maven 3.9+, Java 21+ and dependency convergence.
 
 ### Consequences
@@ -163,34 +167,48 @@ Micrometer (`instrument.internal`), Netty (`util.internal`) and the JDK (`jdk.in
 - Exceptions stay in one package, because applications catch them everywhere.
 - Tests mirror the main packages.
 - Every Java type has class-level Javadoc. Code has no inline comments.
+- One top-level type per file: interfaces, implementations, records and enums each get their own file
+  rather than being nested inside another class. The exceptions are Spring Boot conventions: nested
+  `@Configuration` groups inside an auto-configuration, and nested records for property groups such as
+  `plugkit.db.pool.*`.
+- Classes that log declare their logger with Lombok `@Slf4j`, never a hand-written `LoggerFactory` field.
+- Plain field getters in internal classes use Lombok `@Getter`; `lombok.config` sets fluent accessors, so
+  they read like record accessors (`dataSource()`, not `getDataSource()`). Public API getters are written
+  out, because the Javadoc tool doesn't run Lombok and would leave them out of the published docs.
 
 ### Structure
 
 ```
 io.github.varnitta.plugkit.db                 exported
-├── Database, Databases, DatabaseType, Health     entry points
+├── Database, Databases, DatabaseType             entry points
 ├── config/        DatabaseConfig, PoolConfig, SessionConfig, TxConfig
 ├── sql/           SqlOperations, Params, Row, RowMapper
 ├── tx/            Transaction, TxOptions, Isolation
-├── exception/     DatabaseException hierarchy, InvalidConfigException
+├── exception/     DatabaseException hierarchy
 ├── metrics/       MeteredDatabases
 ├── spring/        PlugkitDbProperties, @RetryOnTransient, @Timeouts
 └── internal/                                     not exported
     ├── connection/    ConnectionProvider, DataSourceConnectionProvider
     ├── dialect/       Dialect, Dialects
     │   └── postgres/  PostgresDialect
-    ├── metrics/       MetricsRecorder, MicrometerMetricsRecorder
-    ├── pool/          PooledDatabase, HikariPoolFactory, DriverCheck, InFlightTracker
+    ├── metrics/       MetricsRecorder, MetricsRecorderFactory, NoMetricsRecorder,
+    │                  MicrometerMetricsRecorder
+    ├── pool/          PooledDatabase, TranslatingConnectionProvider, HikariPoolFactory, DriverCheck
     ├── spring/        auto-configurations, SpringConnectionProvider, interceptors,
-    │                  DatabaseHealthIndicator, AnnotationLookup
-    ├── statement/     StatementExecutor, NamedSql, ResultSetRow, UncheckedSqlException
-    ├── tx/            TransactionRunner, ConnectionTransaction, Backoff, TimeoutOverrides
-    └── validation/    ConfigValidator
+    │                  DatabaseHealthIndicator, AnnotationLookup, ProxyCreatorRegistrar
+    ├── statement/     StatementExecutor, NamedSql, BoundSql, ResultSetRow, UncheckedSqlException,
+    │                  SqlFunction, SqlSupplier
+    └── tx/            TransactionRunner, ConnectionTransaction, TimeoutOverrides, TimeoutOverride,
+                       TimeoutOverrideScope
+
+io.github.varnitta.plugkit.core               from plugkit-core (part 5)
+├── Health, exception/ PlugkitException, InvalidConfigException      exported
+└── internal/ validation, retry, lifecycle, redaction                exported only to plugkit-db
 ```
 
 | Package | Role | Explained in |
 |---|---|---|
-| root | `Databases` creates a `Database`; `DatabaseType` names supported databases; `Health` reports checks | [ADR-0002 part 1](0002-connections-configuration-and-lifecycle.md#1-datasource-first-connections-cloud-support-through-drivers), [ADR-0003 part 1](0003-multi-database-support.md#1-dialect-adapters-and-a-factory-for-multiple-databases), [ADR-0005 part 2](0005-integrations.md#2-logging-metrics-and-health) |
+| root | `Databases` creates a `Database`; `DatabaseType` names supported databases | [ADR-0002 part 1](0002-connections-configuration-and-lifecycle.md#1-datasource-first-connections-cloud-support-through-drivers), [ADR-0003 part 1](0003-multi-database-support.md#1-dialect-adapters-and-a-factory-for-multiple-databases), [ADR-0005 part 2](0005-integrations.md#2-logging-metrics-and-health) |
 | `config` | Immutable, validated configuration | [ADR-0002 part 2](0002-connections-configuration-and-lifecycle.md#2-immutable-validated-configuration-with-safe-defaults) |
 | `sql` | Statements, parameters and row mapping | [ADR-0004 part 1](0004-running-sql.md#1-plain-sql-with-named-parameters-and-row-mappers) |
 | `tx` | Transactions and their options | [ADR-0004 part 2](0004-running-sql.md#2-transactions-with-deadlines-opt-in-retry-and-safe-commits) |
@@ -204,7 +222,6 @@ io.github.varnitta.plugkit.db                 exported
 | `internal.spring` | Spring adapters and auto-configuration | [ADR-0005 part 3](0005-integrations.md#3-spring-boot-4-integration) |
 | `internal.statement` | Statement execution and parameter parsing | [ADR-0004 part 1](0004-running-sql.md#1-plain-sql-with-named-parameters-and-row-mappers) |
 | `internal.tx` | Transaction engine | [ADR-0004 part 2](0004-running-sql.md#2-transactions-with-deadlines-opt-in-retry-and-safe-commits) |
-| `internal.validation` | Configuration validation helper | [ADR-0002 part 2](0002-connections-configuration-and-lifecycle.md#2-immutable-validated-configuration-with-safe-defaults) |
 
 ```mermaid
 flowchart TD
@@ -225,7 +242,10 @@ flowchart TD
         dialect
         imetrics[metrics]
         ispring[spring]
-        validation
+    end
+    subgraph core[plugkit-core]
+        validation[internal.validation]
+        cexception[exception]
     end
     root --> pool
     metrics --> pool
@@ -245,7 +265,8 @@ flowchart TD
     config --> validation
     tx --> validation
     dialect --> validation
-    validation --> exception
+    validation --> cexception
+    exception --> cexception
 ```
 
 #### Boundaries enforced by `ArchitectureTest`
@@ -256,10 +277,10 @@ flowchart TD
 | Only `metrics`, `internal.metrics` and `internal.spring` use Micrometer | The core works without Micrometer |
 | Only `internal.dialect.postgres` uses the PostgreSQL driver | Database-specific code stays in its dialect |
 | Only `internal.pool` and `internal.metrics` use HikariCP | The pool can be replaced |
-| `exception` depends only on itself, the JDK and JSpecify | Catching an exception pulls in nothing else |
-| `config` depends only on `internal.validation` | Configuration stays independent of the engine |
+| `exception` depends only on itself, core's exceptions, the JDK and JSpecify | Catching an exception pulls in nothing else |
+| `config` depends only on core's validation | Configuration stays independent of the engine |
 | `internal.*` packages have no cycles | Each internal package can be changed on its own |
-| Public methods in exported packages don't use `internal` types | Applications can't reach internals through the API |
+| Public methods in exported packages don't use `internal` types, plugkit-db's or plugkit-core's | Applications can't reach internals through the API |
 | Internal implementation classes are `final` | Nothing outside the library extends them |
 
 ### Consequences
@@ -334,3 +355,98 @@ flowchart LR
   ([ADR-0003 part 1](0003-multi-database-support.md#1-dialect-adapters-and-a-factory-for-multiple-databases)).
 - Not covered yet: performance benchmarks against raw JDBC (JMH) and binary-compatibility checks
   (`japicmp`), planned before 1.0.
+
+## 5. Shared `plugkit-core` module
+
+### Context
+
+plugkit-util will hold several libraries (database, Kafka, cache). Each needs the same building
+blocks: validated configuration, retry backoff, graceful shutdown, secret redaction in `toString()`,
+health results and a common exception base. Copying them into every library would let them drift
+apart. A separate resilience library was also planned; its retry and timeout primitives overlap with
+the same building blocks.
+
+### Decision
+
+- A **`plugkit-core`** module (`io.github.varnitta.plugkit.core`) holds the building blocks every
+  plugkit library shares. Every library depends on it; it depends on no other plugkit module.
+- **Core depends only on the JDK and JSpecify.** No SLF4J, Lombok, Micrometer or Spring, so depending on
+  it costs nothing. `ArchitectureTest` in core enforces this.
+- **Two kinds of packages:**
+
+| Package | Exported to | Holds |
+|---|---|---|
+| `core` | everyone | `Health` |
+| `core.exception` | everyone | `PlugkitException` (base, `isRetryable()`), `InvalidConfigException` |
+| `core.internal.validation` | plugkit modules only | `ConfigValidator` |
+| `core.internal.retry` | plugkit modules only | `Backoff` |
+| `core.internal.lifecycle` | plugkit modules only | `InFlightTracker` |
+| `core.internal.redaction` | plugkit modules only | `Redaction` |
+
+- **Internal packages use qualified exports**
+  (`exports io.github.varnitta.plugkit.core.internal.retry to io.github.varnitta.plugkit.db;`), so on
+  the module path applications can't import them. Each new library is added to the `to` list.
+- **Every plugkit exception extends `PlugkitException`.** `DatabaseException` and
+  `InvalidConfigException` do today, so applications can catch all plugkit failures in one place and
+  retry logic can rely on `isRetryable()` across libraries.
+- **Resilience patterns live in core, not in a separate library.** Timeouts, retries, circuit breakers
+  and bulkheads will be added to core when they're built, starting from `Backoff`.
+- **Something moves to core only when it is truly shared.** `TimeoutOverrides` (statement and
+  transaction semantics), `MetricsRecorder` (statement and transaction events) and the Spring helpers
+  stay in plugkit-db until a second library needs them.
+
+### Structure
+
+```mermaid
+flowchart TD
+    subgraph core[plugkit-core]
+        CP[core: Health]
+        CE[core.exception: PlugkitException, InvalidConfigException]
+        CI[core.internal: ConfigValidator, Backoff, InFlightTracker, Redaction]
+    end
+    DB[plugkit-db] -->|requires transitive| core
+    KAFKA[future plugkit-kafka] -.-> core
+    CACHE[future plugkit-cache] -.-> core
+    APP[Application] --> DB
+    APP -.->|sees only exported packages| CP
+    APP -.-> CE
+```
+
+```mermaid
+classDiagram
+    RuntimeException <|-- PlugkitException
+    PlugkitException <|-- InvalidConfigException
+    PlugkitException <|-- DatabaseException
+    class PlugkitException {
+        <<abstract, plugkit-core>>
+        +isRetryable() boolean
+    }
+    class InvalidConfigException {
+        <<plugkit-core>>
+        +problems() List~String~
+    }
+    class DatabaseException {
+        <<plugkit-db>>
+        +sqlState() Optional~String~
+    }
+```
+
+| Class | Used by plugkit-db for |
+|---|---|
+| `ConfigValidator` | Validating `DatabaseConfig`, `PoolConfig`, `SessionConfig`, `TxConfig`, `TxOptions` and dialect connection properties |
+| `Backoff` | Waits between transaction retries and `@RetryOnTransient` attempts |
+| `InFlightTracker` | Graceful `close()` of a `Database` ([ADR-0002 part 3](0002-connections-configuration-and-lifecycle.md#3-lifecycle-and-graceful-shutdown)) |
+| `Redaction` | `DatabaseConfig.toString()`: password, secret driver properties, secrets in the URL |
+| `Health` | The result of `Database.health()` |
+
+`plugkit-db` declares `requires transitive io.github.varnitta.plugkit.core`, so applications that use
+plugkit-db can use `Health` and the core exceptions without a separate dependency.
+
+### Consequences
+
+- New libraries start with validation, backoff, shutdown, redaction and the exception base ready.
+- A fix in a shared building block reaches every library at once.
+- Core's internal API is a contract between plugkit modules only; it can change in any release because
+  all modules ship on the same version.
+- Core's exported API (`Health`, the exceptions) is public and follows semantic versioning like any
+  library API.

@@ -14,6 +14,7 @@
   <url>https://github.com/varnit-ta/plugkit-util</url>
 
   <modules>
+    <module>plugkit-core</module>
     <module>plugkit-db</module>
   </modules>
 
@@ -50,6 +51,11 @@
 
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>io.github.varnit-ta</groupId>
+        <artifactId>plugkit-core</artifactId>
+        <version>${revision}</version>
+      </dependency>
       <dependency>
         <groupId>org.projectlombok</groupId>
         <artifactId>lombok</artifactId>

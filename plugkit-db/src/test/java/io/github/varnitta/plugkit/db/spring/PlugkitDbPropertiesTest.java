@@ -36,7 +36,7 @@ class PlugkitDbPropertiesTest {
 
         DatabaseConfig config = properties.toDatabaseConfig();
 
-        assertThat(config.type()).isEqualTo(DatabaseType.POSTGRES);
+        assertThat(config.databaseType()).isEqualTo(DatabaseType.POSTGRES);
         assertThat(config.user()).isEqualTo("app");
         assertThat(config.password()).isEqualTo("secret");
         assertThat(config.poolName()).isEqualTo("orders");
